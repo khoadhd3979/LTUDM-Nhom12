@@ -1,0 +1,8 @@
+{
+    "java.project.referencedLibraries": [
+        "lib/**/*.jar",
+        "c:\\Project\\N3_HK1\\LTUDM\\json-20230618.jar",
+        "c:\\Project\\N3_HK1\\LTUDM\\jsoup-1.23.2.jar"
+    ],
+    "java.configuration.updateBuildConfiguration": "interactive"
+}
