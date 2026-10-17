@@ -11,31 +11,34 @@ Dự án được chia thành 2 module độc lập (Client và Server) nằm ch
 ```text
 Secure_Real-time_Messaging_App/
 │
-├── Server/                     # Không gian làm việc của Khoa
-│   ├── src/
-│   │   ├── main/ServerMain.java  # File chạy Server
-│   │   ├── network/            # Quản lý Socket đa luồng, Client Handler
-│   │   ├── dto/                # Các object ánh xạ từ Database (User, Message)
-│   │   ├── dao/                # Các file truy vấn CSDL (UserDAO, MessageDAO)
-│   │   ├── bll/                # Xử lý nghiệp vụ (LoginBLL, GroupBLL)
-│   │   └── utils/              # Tiện ích: SecurityUtils (RSA), MailUtils
-│   └── lib/                    # Chứa thư viện jar: JDBC (MySQL/SQLServer), JavaMail
+├── securechat-server/          # CÔNG VIỆC CỦA KHOA (Chuẩn Maven)
+│   ├── .env                    # (Khoa tự tạo) Chứa biến môi trường cá nhân (KHÔNG GỬI LÊN GIT)
+│   ├── .env.example            # Chứa các biến mẫu để Sự biết cấu hình (Gửi lên Git)
+│   ├── pom.xml                 # Cấu hình Maven (Thư viện: SQL Server, Jackson, BCrypt, Dotenv)
+│   └── src/main/java/com/securechat/
+│       ├── bll/                # Nghiệp vụ: UserBLL, GroupBLL
+│       ├── common/protocol/    # Giao thức chung: Packet, MessageType, ProtocolSerializer
+│       ├── config/             # Cấu hình: AppConfig (đọc từ .env)
+│       ├── dao/                # Truy vấn CSDL: UserDAO, DBConnection (Facade)
+│       ├── dto/                # Ánh xạ CSDL: UserDTO
+│       ├── security/           # Bảo mật: SecurityUtils (BCrypt)
+│       ├── server/             # Mạng TCP: ServerMain, ClientHandler
+│       └── utils/              # Tiện ích: MailUtils
 │
-├── Client/                     # Không gian làm việc của Sự
-│   ├── src/
-│   │   ├── main/ClientMain.java  # File chạy Client GUI
-│   │   ├── gui/                # Các class giao diện Java Swing (LoginFrame, ChatPanel)
-│   │   ├── network/            # Quản lý Socket kết nối đến Server, luồng đọc/ghi
-│   │   ├── controller/         # Xử lý sự kiện từ GUI gọi xuống network
-│   │   └── utils/              # Tiện ích: SecurityUtils (AES), ValidateUtils
-│   └── assets/                 # Chứa hình ảnh, icon, sticker cho giao diện
+├── securechat-client/          # CÔNG VIỆC CỦA SỰ (Nên dùng Maven để tái sử dụng thư viện chung)
+│   ├── pom.xml                 # Cấu hình Maven (Jackson để parse JSON)
+│   └── src/main/java/com/securechat/client/
+│       ├── controller/         # Xử lý sự kiện từ GUI
+│       ├── gui/                # Giao diện Java Swing
+│       ├── network/            # Socket Client, gửi nhận JSON theo dòng (NDJSON)
+│       └── ...
 │
 ├── database/                   # Chứa script CSDL
-│   └── schema.sql              # File tạo bảng và dữ liệu mẫu
+│   └── schema_mssql.sql        # File tạo bảng SQL Server
 │
-├── .gitignore
-├── README.md
-└── WORKFLOW.md
+├── _legacy/                    # Nơi chứa các file code cũ, rác, code backup (Không biên dịch)
+├── .gitignore                  # Bỏ qua thư mục target/, .env
+└── docs/                       # Tài liệu (PROTOCOL.md, WORKFLOW.md)
 
 ```
 
