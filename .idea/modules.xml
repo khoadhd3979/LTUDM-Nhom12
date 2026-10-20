@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Secure_Real-time_Messaging_App.iml" filepath="$PROJECT_DIR$/.idea/Secure_Real-time_Messaging_App.iml" />
+      <module fileurl="file://$PROJECT_DIR$/SecureChat_Client.iml" filepath="$PROJECT_DIR$/SecureChat_Client.iml" />
     </modules>
   </component>
 </project>

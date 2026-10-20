@@ -22,7 +22,6 @@ public class RegisterFrame extends JFrame {
         lblTitle.setBorder(BorderFactory.createEmptyBorder(15, 0, 5, 0));
         add(lblTitle, BorderLayout.NORTH);
 
-
         JPanel pnlForm = new JPanel(new GridLayout(5, 2, 10, 12));
         pnlForm.setBorder(BorderFactory.createEmptyBorder(10, 30, 10, 30));
 
@@ -48,7 +47,6 @@ public class RegisterFrame extends JFrame {
 
         add(pnlForm, BorderLayout.CENTER);
 
-        // Panel chứa nút bấm
         JPanel pnlButtons = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
         btnRegister = new JButton("Đăng ký");
         btnBack = new JButton("Quay lại Đăng nhập");
@@ -59,13 +57,25 @@ public class RegisterFrame extends JFrame {
         add(pnlButtons, BorderLayout.SOUTH);
     }
 
+    public String getGender() {
+        if (cbGender.getSelectedItem() != null) {
+            String selected = cbGender.getSelectedItem().toString();
+            if ("Nam".equals(selected)) return "MALE";
+            if ("Nữ".equals(selected)) return "FEMALE";
+        }
+        return "OTHER";
+    }
+
+    public String getDateOfBirth() {
+        return txtDob.getText().trim();
+    }
 
     public String getEmail() {
         return txtEmail.getText().trim();
     }
 
-    public String getPassword() {
-        return new String(txtPassword.getPassword());
+    public char[] getPassword() {
+        return txtPassword.getPassword();
     }
 
     public String getFullName() {

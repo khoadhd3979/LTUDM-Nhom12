@@ -36,13 +36,12 @@ public class LoginFrame extends JFrame {
         add(panelBtn);
     }
 
-
     public String getEmail() {
         return txtEmail.getText().trim();
     }
 
-    public String getPassword() {
-        return new String(txtPassword.getPassword()).trim();
+    public char[] getPassword() {
+        return txtPassword.getPassword();
     }
 
     public void setLoginButtonListener(ActionListener listener) {

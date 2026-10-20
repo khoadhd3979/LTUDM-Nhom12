@@ -1,61 +1,66 @@
 package controller;
 
+import com.securechat.common.protocol.MessageType;
 import gui.DashboardFrame;
-import network.ClientPacketHandler;
-import network.ClientReceiver;
 import network.ClientSocketManager;
+import network.ClientReceiver; // Đã thêm import luồng nhận tin nhắn
+import com.securechat.common.protocol.Packet;
+import com.securechat.common.protocol.ProtocolSerializer;
 
-import javax.swing.*;
-import java.io.File;
-import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public class DashboardController {
     private DashboardFrame view;
+    private ClientReceiver receiver;
 
     public DashboardController(DashboardFrame view) {
         this.view = view;
         initController();
-        startReceiver();
+
+        receiver = new ClientReceiver(ClientSocketManager.getSocket(), view);
+        receiver.start();
     }
 
     private void initController() {
         view.addSendListener(e -> {
             String msg = view.getMessageInput();
-            if (!msg.isEmpty()) {
-                view.appendMessage("[Tôi]: " + msg);
-                ClientSocketManager.sendPacket("MSG|" + msg);
-                view.clearMessageInput();
-            }
-        });
-
-        view.addAttachListener(e -> {
-            JFileChooser fileChooser = new JFileChooser();
-            int option = fileChooser.showOpenDialog(view.getFrame());
-            if (option == JFileChooser.APPROVE_OPTION) {
-                File selectedFile = fileChooser.getSelectedFile();
-                if (selectedFile.length() > 1024 * 1024) {
-                    JOptionPane.showMessageDialog(view.getFrame(), "File phải dưới 1MB!", "Từ chối", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-
+            if (msg != null && !msg.trim().isEmpty()) {
                 try {
-                    List<byte[]> chunks = ClientPacketHandler.splitFileIntoChunks(selectedFile);
-                    view.appendMessage("[Hệ thống]: Đang gửi file " + selectedFile.getName() + " (" + chunks.size() + " gói nhỏ)...");
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("msg", msg);
 
-                    // TODO: Gửi từng chunk qua ClientSocketManager
+                    Packet packet = Packet.request(MessageType.SEND_MESSAGE, UUID.randomUUID().toString(), payload);
+                    String jsonStr = ProtocolSerializer.toJson(packet);
+
+                    ClientSocketManager.sendPacket(jsonStr);
+
+                    view.appendMessage("[Tôi]: " + msg);
+                    view.clearMessageInput();
                 } catch (Exception ex) {
                     ex.printStackTrace();
-                    JOptionPane.showMessageDialog(view.getFrame(), "Lỗi đọc file!", "Lỗi", JOptionPane.ERROR_MESSAGE);
                 }
+            }
+        });
+        view.setLogoutListener(e -> {
+            try {
+                Packet logoutPacket = Packet.request("LOGOUT", UUID.randomUUID().toString(), new HashMap<>());
+                ClientSocketManager.sendPacket(ProtocolSerializer.toJson(logoutPacket));
+
+                if (receiver != null) {
+                    receiver.stopReceiver();
+                }
+
+                gui.LoginFrame loginView = new gui.LoginFrame();
+                new LoginController(loginView);
+                loginView.setVisible(true);
+                view.dispose();
+
+            } catch (Exception ex) {
+                ex.printStackTrace();
             }
         });
     }
 
-
-    private void startReceiver() {
-        if (ClientSocketManager.getSocket() != null) {
-            ClientReceiver receiver = new ClientReceiver(ClientSocketManager.getSocket(), view);
-            receiver.start();
-        }
-    }
 }

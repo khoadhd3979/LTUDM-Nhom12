@@ -5,71 +5,71 @@ import java.awt.*;
 import java.awt.event.ActionListener;
 
 public class DashboardFrame extends JFrame {
-    private JList<String> friendList;
-    private DefaultListModel<String> friendListModel;
-    private JTextPane chatArea;
-    private JTextField txtMessage;
-    private JButton btnSend, btnAttach;
+    private JTextArea txtChatArea;
+    private JTextField txtMessageInput;
+    private JButton btnSend;
+    private JButton btnLogout;
 
     public DashboardFrame() {
+        initComponents();
+    }
+
+    private void initComponents() {
         setTitle("SecureChat - Dashboard");
-        setSize(850, 550);
+        setSize(600, 450);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout());
+        setLayout(new BorderLayout(10, 10));
 
-        friendListModel = new DefaultListModel<>();
-        friendList = new JList<>(friendListModel);
-        JScrollPane leftScroll = new JScrollPane(friendList);
-        leftScroll.setPreferredSize(new Dimension(220, 0));
-        add(leftScroll, BorderLayout.WEST);
-        JPanel chatPanel = new JPanel(new BorderLayout());
-        chatArea = new JTextPane();
-        chatArea.setEditable(false);
-        chatPanel.add(new JScrollPane(chatArea), BorderLayout.CENTER);
-        JPanel inputPanel = new JPanel(new BorderLayout());
-        txtMessage = new JTextField();
+        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        btnLogout = new JButton("Đăng xuất");
+        btnLogout.setBackground(new Color(255, 102, 102));
+        btnLogout.setForeground(Color.WHITE);
+        topPanel.add(btnLogout);
+        add(topPanel, BorderLayout.NORTH);
+
+        txtChatArea = new JTextArea();
+        txtChatArea.setEditable(false);
+        txtChatArea.setLineWrap(true);
+        txtChatArea.setWrapStyleWord(true);
+        txtChatArea.setMargin(new Insets(5, 5, 5, 5));
+        JScrollPane scrollPane = new JScrollPane(txtChatArea);
+        add(scrollPane, BorderLayout.CENTER);
+
+        JPanel bottomPanel = new JPanel(new BorderLayout(5, 0));
+        bottomPanel.setBorder(BorderFactory.createEmptyBorder(0, 5, 5, 5));
+
+        txtMessageInput = new JTextField();
         btnSend = new JButton("Gửi");
-        btnAttach = new JButton("Đính kèm");
+        btnSend.setBackground(new Color(51, 153, 255));
+        btnSend.setForeground(Color.WHITE);
 
-        JPanel rightButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
-        rightButtons.add(btnAttach);
-        rightButtons.add(btnSend);
-
-        inputPanel.add(txtMessage, BorderLayout.CENTER);
-        inputPanel.add(rightButtons, BorderLayout.EAST);
-        chatPanel.add(inputPanel, BorderLayout.SOUTH);
-
-        add(chatPanel, BorderLayout.CENTER);
+        bottomPanel.add(txtMessageInput, BorderLayout.CENTER);
+        bottomPanel.add(btnSend, BorderLayout.EAST);
+        add(bottomPanel, BorderLayout.SOUTH);
     }
 
     public String getMessageInput() {
-        return txtMessage.getText().trim();
+        return txtMessageInput.getText();
     }
 
     public void clearMessageInput() {
-        txtMessage.setText("");
+        txtMessageInput.setText("");
     }
 
-    public void appendMessage(String message) {
-        chatArea.setText(chatArea.getText() + "\n" + message);
-    }
-
-    public JFrame getFrame() {
-        return this;
+    public void appendMessage(String msg) {
+        txtChatArea.append(msg + "\n");
+        txtChatArea.setCaretPosition(txtChatArea.getDocument().getLength());
     }
 
     public void addSendListener(ActionListener listener) {
         btnSend.addActionListener(listener);
+        txtMessageInput.addActionListener(listener);
     }
 
-    public void addAttachListener(ActionListener listener) {
-        btnAttach.addActionListener(listener);
-    }
-    public void updateFriendList(String[] friends) {
-        friendListModel.clear();
-        for (String f : friends) {
-            friendListModel.addElement(f);
+    public void setLogoutListener(ActionListener listener) {
+        if (btnLogout != null) {
+            btnLogout.addActionListener(listener);
         }
     }
 }

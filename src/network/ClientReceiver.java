@@ -1,44 +1,60 @@
 package network;
 
 import gui.DashboardFrame;
-import javax.swing.*;
-import java.io.ObjectInputStream;
-import java.net.Socket;
+import main.ClientMain;
+import com.securechat.common.protocol.Packet;
+import com.securechat.common.protocol.ProtocolSerializer;
+
+import javax.swing.SwingUtilities;
+import javax.swing.JOptionPane;
+import java.io.BufferedReader;
 
 public class ClientReceiver extends Thread {
-    private Socket socket;
+    private BufferedReader in;
     private DashboardFrame view;
+    private volatile boolean isRunning = true;
 
-    public ClientReceiver(Socket socket, DashboardFrame view) {
-        this.socket = socket;
+    public ClientReceiver(java.net.Socket socket, DashboardFrame view) {
+        this.in = ClientSocketManager.getInputStream();
         this.view = view;
     }
 
     @Override
     public void run() {
         try {
-            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-            while (true) {
-                Object receivedObject = in.readObject();
-                if (receivedObject != null) {
-                    String content = receivedObject.toString();
-
-                    SwingUtilities.invokeLater(() -> {
-                        if (view != null) {
-                            if (content.startsWith("FRIENDS|")) {
-                                String[] friends = content.substring(8).split(",");
-                                view.updateFriendList(friends);
-                            } else {
-                                view.appendMessage("[Server]: " + content);
-                            }
-                        }
-                    });
-                }
+            String line;
+            while (isRunning && (line = in.readLine()) != null) {
+                Packet packet = ProtocolSerializer.fromJson(line);
+                handleIncomingPacket(packet);
             }
         } catch (Exception e) {
-            SwingUtilities.invokeLater(() -> {
-                JOptionPane.showMessageDialog(null, "Mất kết nối tới Server!", "Lỗi mạng", JOptionPane.ERROR_MESSAGE);
-            });
+            if (isRunning) {
+                SwingUtilities.invokeLater(() -> {
+                    view.appendMessage("[Hệ thống]: Mất kết nối đến Server!");
+                    JOptionPane.showMessageDialog(view, "Đã mất kết nối đến Server! Vui lòng kết nối lại.", "Lỗi kết nối", JOptionPane.ERROR_MESSAGE);
+                    view.dispose();
+                    new ClientMain().setVisible(true);
+                });
+            }
         }
+    }
+
+    private void handleIncomingPacket(Packet packet) {
+        SwingUtilities.invokeLater(() -> {
+            if ("CHAT".equals(packet.getType()) || "BROADCAST".equals(packet.getType())) {
+                Object msg = packet.getPayload().get("msg");
+                Object sender = packet.getPayload().get("sender");
+                if (msg != null) {
+                    String displaySender = (sender != null) ? sender.toString() : "Người lạ";
+                    view.appendMessage("[" + displaySender + "]: " + msg.toString());
+                }
+            } else if ("ERROR".equals(packet.getType())) {
+                view.appendMessage("[Hệ thống báo lỗi]: " + packet.getError());
+            }
+        });
+    }
+
+    public void stopReceiver() {
+        isRunning = false;
     }
 }
