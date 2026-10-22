@@ -1,5 +1,6 @@
 package com.securechat.utils;
 
+import com.securechat.config.AppConfig;
 import jakarta.mail.Authenticator;
 import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
@@ -12,44 +13,47 @@ import jakarta.mail.internet.MimeMessage;
 import java.util.Properties;
 
 public final class MailUtils {
-    private static final boolean MAIL_ENABLED =
-            Boolean.parseBoolean(System.getenv().getOrDefault("SC_MAIL_ENABLED", "false"));
-    private static final String SMTP_HOST = System.getenv().getOrDefault("SC_MAIL_HOST", "smtp.gmail.com");
-    private static final int    SMTP_PORT = Integer.parseInt(System.getenv().getOrDefault("SC_MAIL_PORT", "587"));
-    private static final String SMTP_USER = System.getenv("SC_MAIL_USER");
-    private static final String SMTP_PASS = System.getenv("SC_MAIL_PASSWORD");
-    private static final String FROM      = System.getenv().getOrDefault("SC_MAIL_FROM",
-                                                SMTP_USER == null ? "" : SMTP_USER);
-
+    
     private MailUtils() {}
 
     public static void sendOtp(String toEmail, String otp) {
-        if (!MAIL_ENABLED || SMTP_USER == null || SMTP_PASS == null) {
-            // Chỉ dùng cho dev — không rò secret, chỉ in OTP khi cờ tắt.
+        if (!AppConfig.mailEnabled()) {
+            // Development mode — only print when MAIL_ENABLED=false.
             System.out.println("[MAIL-DEV] OTP cho " + toEmail + " = " + otp);
             return;
         }
+        
+        String user = AppConfig.mailUser();
+        String pass = AppConfig.mailPassword();
+        
+        if (user == null || pass == null) {
+            throw new IllegalStateException(
+                    "MAIL_ENABLED=true nhưng thiếu SC_MAIL_USER/SC_MAIL_PASSWORD");
+        }
+        
         try {
             Properties props = new Properties();
             props.put("mail.smtp.auth", "true");
             props.put("mail.smtp.starttls.enable", "true");
-            props.put("mail.smtp.host", SMTP_HOST);
-            props.put("mail.smtp.port", String.valueOf(SMTP_PORT));
+            props.put("mail.smtp.host", AppConfig.mailHost());
+            props.put("mail.smtp.port", String.valueOf(AppConfig.mailPort()));
 
             Session session = Session.getInstance(props, new Authenticator() {
-                @Override protected PasswordAuthentication getPasswordAuthentication() {
-                    return new PasswordAuthentication(SMTP_USER, SMTP_PASS);
+                @Override 
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    return new PasswordAuthentication(user, pass);
                 }
             });
 
             Message msg = new MimeMessage(session);
-            msg.setFrom(new InternetAddress(FROM));
+            msg.setFrom(new InternetAddress(AppConfig.mailFrom()));
             msg.setRecipients(Message.RecipientType.TO, InternetAddress.parse(toEmail));
             msg.setSubject("SecureChat - Mã xác thực OTP");
             msg.setText("Mã OTP của bạn là: " + otp + "\nHiệu lực 10 phút.");
+            
             Transport.send(msg);
         } catch (MessagingException e) {
-            // KHÔNG đưa OTP vào message lỗi.
+            // KHÔNG đưa OTP vào message lỗi để tránh lộ lọt bảo mật.
             throw new RuntimeException("Gửi email thất bại: " + e.getMessage(), e);
         }
     }

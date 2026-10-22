@@ -23,10 +23,10 @@
 hs_err_pid*
 replay_pid*
 
-.env
-
 target/
 .env
 *.log
 .vscode/
 .idea/
+*.class
+.vscode/settings.json

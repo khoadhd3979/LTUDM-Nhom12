@@ -8,5 +8,9 @@ public final class MessageType {
     public static final String OK    = "OK";
     public static final String ERROR = "ERROR";
 
-    // Phase 2+: REGISTER, VERIFY_OTP, LOGIN, LOGOUT, SEND_MESSAGE, ...
+    // Phase 2+: Authentication
+    public static final String REGISTER   = "REGISTER";
+    public static final String VERIFY_OTP = "VERIFY_OTP";
+    public static final String LOGIN      = "LOGIN";
+    public static final String LOGOUT     = "LOGOUT";
 }
