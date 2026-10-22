@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 public class UserDAO {
@@ -112,10 +113,8 @@ public class UserDAO {
         Date d = rs.getDate("date_of_birth");
         u.setDateOfBirth(d == null ? null : d.toLocalDate());
         u.setStatus(rs.getString("status"));
-        Timestamp ct = rs.getTimestamp("created_at");
-        u.setCreatedAt(ct == null ? null : ct.toLocalDateTime());
-        Timestamp ut = rs.getTimestamp("updated_at");
-        u.setUpdatedAt(ut == null ? null : ut.toLocalDateTime());
+        u.setCreatedAt(rs.getObject("created_at", LocalDateTime.class));
+        u.setUpdatedAt(rs.getObject("updated_at", LocalDateTime.class));
         return u;
     }
 }

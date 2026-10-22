@@ -24,4 +24,29 @@ public final class SecurityUtils {
         RNG.nextBytes(b);
         return Base64.getEncoder().encodeToString(b);
     }
+    public static byte[] concat(byte[]... arrays) {
+        int total = 0;
+        for (byte[] a : arrays) total += a.length;
+        byte[] r = new byte[total];
+        int off = 0;
+        for (byte[] a : arrays) { System.arraycopy(a, 0, r, off, a.length); off += a.length; }
+        return r;
+    }
+
+    /** Unambiguous concatenation: uint32(length) || bytes per field. */
+    public static byte[] concatLenPrefixed(byte[]... arrays) {
+        int total = 0;
+        for (byte[] a : arrays) total += 4 + a.length;
+        byte[] r = new byte[total];
+        int off = 0;
+        for (byte[] a : arrays) {
+            r[off++] = (byte)(a.length >>> 24);
+            r[off++] = (byte)(a.length >>> 16);
+            r[off++] = (byte)(a.length >>> 8);
+            r[off++] = (byte)(a.length);
+            System.arraycopy(a, 0, r, off, a.length);
+            off += a.length;
+        }
+        return r;
+    }
 }

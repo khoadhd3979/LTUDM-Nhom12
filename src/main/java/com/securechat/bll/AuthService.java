@@ -21,6 +21,8 @@ public class AuthService {
 
     private static final int OTP_TTL_MINUTES = 10;
     private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final String DUMMY_HASH =
+            PasswordHasher.hash("DUMMY_TIMING_PROTECTION_NEVER_USED_AS_REAL_PASSWORD");
 
     private final UserDAO userDAO = new UserDAO();
     private final EmailOtpDAO otpDAO = new EmailOtpDAO();
@@ -59,11 +61,19 @@ public class AuthService {
         try (Connection c = DBConnection.open()) {
             c.setAutoCommit(false);
             try {
-                userId = userDAO.insert(c, user);
+                try {
+                    userId = userDAO.insert(c, user);
+                } catch (SQLException e) {
+                    if (isUniqueViolation(e)) {
+                        try { c.rollback(); } catch (SQLException ignored) {}
+                        throw new BusinessException("EMAIL_EXISTS", "Email đã được sử dụng");
+                    }
+                    throw e;
+                }
                 otpDAO.insert(c, userId, otpHash, "REGISTER", expiresAt);
                 c.commit();
-            } catch (SQLException e) {
-                c.rollback();
+            } catch (SQLException | BusinessException e) {
+                try { c.rollback(); } catch (SQLException ignored) {}
                 throw e;
             }
         }
@@ -103,9 +113,12 @@ public class AuthService {
         if (!"PENDING".equals(user.getStatus()))
             throw new BusinessException("ACCOUNT_NOT_PENDING", "Tài khoản không ở trạng thái chờ xác thực");
 
-        Optional<OtpRecord> opt = otpDAO.findLatestActive(user.getId(), "REGISTER");
+        Optional<OtpRecord> opt = otpDAO.findLatest(user.getId(), "REGISTER");
         OtpRecord otp = opt.orElseThrow(() ->
-                new BusinessException("OTP_NOT_FOUND", "Không có OTP còn hiệu lực"));
+        new BusinessException("OTP_NOT_FOUND", "Không có OTP còn hiệu lực"));
+
+        if (otp.consumedAt() != null)
+            throw new BusinessException("OTP_ALREADY_USED", "OTP đã được sử dụng");
 
         LocalDateTime nowUtc = LocalDateTime.now(ZoneOffset.UTC);
         if (otp.expiresAt().isBefore(nowUtc))
@@ -154,8 +167,11 @@ public class AuthService {
             throw new BusinessException("AUTH_FAILED", "Email hoặc mật khẩu không đúng");
 
         Optional<UserDTO> opt = userDAO.getUserByEmail(email);
-        if (opt.isEmpty())
+        if (opt.isEmpty()) {
+            // Timing side-channel mitigation: always run BCrypt verify
+            PasswordHasher.verify(password, DUMMY_HASH);
             throw new BusinessException("AUTH_FAILED", "Email hoặc mật khẩu không đúng");
+        }
 
         UserDTO user = opt.get();
         if (!PasswordHasher.verify(password, user.getPasswordHash()))
@@ -171,5 +187,18 @@ public class AuthService {
 
         user.setPasswordHash(null);   // never leave handler with hash
         return user;
+    }
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
+    private static boolean isUniqueViolation(SQLException e) {
+        SQLException cur = e;
+        while (cur != null) {
+            int code = cur.getErrorCode();
+            if (code == 2601 || code == 2627) return true; // SQL Server: unique index / PK
+            cur = cur.getNextException();
+        }
+        return false;
     }
 }

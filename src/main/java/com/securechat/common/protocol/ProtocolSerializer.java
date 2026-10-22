@@ -14,4 +14,9 @@ public final class ProtocolSerializer {
     public static Packet fromJson(String s) throws JsonProcessingException {
         return M.readValue(s, Packet.class);
     }
+
+    public static String toJsonSafe(Packet p) {
+        try { return toJson(p); } catch (Exception e) { return "<unserializable>"; }
+    }
+
 }

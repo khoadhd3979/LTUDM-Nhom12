@@ -30,3 +30,10 @@ target/
 .idea/
 *.class
 .vscode/settings.json
+
+.key
+.pub
+.yml
+
+.github/modernize/
+*.ps1

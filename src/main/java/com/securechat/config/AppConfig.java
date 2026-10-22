@@ -39,4 +39,6 @@ public final class AppConfig {
         if (v == null || v.isBlank()) v = System.getenv(k);
         return v;
     }
+
+    public static String identityKeyPath() { return env("SC_IDENTITY_KEY_PATH", "./server_identity.key"); }
 }

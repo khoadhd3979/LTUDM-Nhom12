@@ -47,12 +47,12 @@ public class EmailOtpDAO {
     }
 
     /** Latest non-consumed OTP regardless of expiry/attempt (caller checks). */
-    public Optional<OtpRecord> findLatestActive(long userId, String purpose) throws SQLException {
+    public Optional<OtpRecord> findLatest(long userId, String purpose) throws SQLException {
         String sql = "SELECT TOP (1) id, user_id, otp_hash, purpose, expires_at, attempt_count, consumed_at " +
-                     "FROM dbo.email_otp WHERE user_id = ? AND purpose = ? AND consumed_at IS NULL " +
-                     "ORDER BY created_at DESC";
+                    "FROM dbo.email_otp WHERE user_id = ? AND purpose = ? " +
+                    "ORDER BY created_at DESC";
         try (Connection c = DBConnection.open();
-             PreparedStatement ps = c.prepareStatement(sql)) {
+            PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, userId);
             ps.setString(2, purpose);
             try (ResultSet rs = ps.executeQuery()) {

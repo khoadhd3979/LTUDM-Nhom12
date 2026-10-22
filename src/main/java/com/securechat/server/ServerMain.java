@@ -1,6 +1,7 @@
 package com.securechat.server;
 
 import com.securechat.config.AppConfig;
+import com.securechat.security.ServerIdentityKeyManager;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -12,6 +13,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+
 public class ServerMain {
 
     private static final int CORE_POOL_SIZE     = 10;
@@ -22,6 +24,7 @@ public class ServerMain {
 
     public static void main(String[] args) throws IOException {
         int port = AppConfig.port();
+        ServerIdentityKeyManager.getInstance();
         ThreadPoolExecutor pool = buildPool();
 
         try (ServerSocket server = new ServerSocket(port)) {
