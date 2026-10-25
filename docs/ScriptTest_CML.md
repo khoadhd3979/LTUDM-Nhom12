@@ -1,21 +1,10 @@
 # 1. BUILD DỰ ÁN
-Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host "1. ĐANG BUILD DỰ ÁN (MAVEN)..." -ForegroundColor Cyan
-Write-Host "=============================================" -ForegroundColor Cyan
 mvn -q clean package
 
 # 2. KHỞI ĐỘNG SERVER (MỞ CỬA SỔ MỚI)
-Write-Host "`n=============================================" -ForegroundColor Cyan
-Write-Host "2. ĐANG KHỞI ĐỘNG SERVER..." -ForegroundColor Cyan
-Write-Host "=============================================" -ForegroundColor Cyan
-Start-Process powershell -ArgumentList "-NoExit -Command `"Title SecureChat-Server; java -jar target/securechat-server.jar`""
-Write-Host "-> Đã mở cửa sổ Server mới. Đang đợi 4 giây để Server khởi động..." -ForegroundColor Yellow
-Start-Sleep -Seconds 4
+java -jar target/securechat-server.jar
 
 # 3. TEST PHASE 1 (NỀN TẢNG TCP)
-Write-Host "`n=============================================" -ForegroundColor Cyan
-Write-Host "3. BẮT ĐẦU TEST PHASE 1 (PING & LỖI)" -ForegroundColor Cyan
-Write-Host "=============================================" -ForegroundColor Cyan
 $c = New-Object System.Net.Sockets.TcpClient("localhost", 8080)
 $s = $c.GetStream()
 $w = New-Object System.IO.StreamWriter($s); $w.AutoFlush = $true
@@ -35,9 +24,6 @@ Write-Host "<- Nhận: " -NoNewline; Write-Host $r.ReadLine() -ForegroundColor G
 $c.Close()
 
 # 4. TEST PHASE 2 (XÁC THỰC AUTH)
-Write-Host "`n=============================================" -ForegroundColor Cyan
-Write-Host "4. BẮT ĐẦU TEST PHASE 2 (XÁC THỰC)" -ForegroundColor Cyan
-Write-Host "=============================================" -ForegroundColor Cyan
 $c2 = New-Object System.Net.Sockets.TcpClient("localhost", 8080)
 $s2 = $c2.GetStream()
 $w2 = New-Object System.IO.StreamWriter($s2); $w2.AutoFlush = $true
@@ -65,10 +51,4 @@ Write-Host "<- Nhận: " -NoNewline; Write-Host $r2.ReadLine() -ForegroundColor 
 $c2.Close()
 
 # 5. HƯỚNG DẪN TEST PHASE 3
-Write-Host "`n=============================================" -ForegroundColor Magenta
-Write-Host "HOÀN TẤT PHASE 1 & 2 TỰ ĐỘNG!" -ForegroundColor Magenta
-Write-Host "=============================================" -ForegroundColor Magenta
-Write-Host "Để test Phase 3 (E2EE), bạn phải làm thủ công 2 bước sau:" -ForegroundColor Yellow
-Write-Host "  1. Chuyển sang cửa sổ Server, copy chuỗi Public Key (nằm dưới dòng '[IDENTITY] Public key...') lưu vào file 'server_identity.pub' tại thư mục gốc."
-Write-Host "  2. Chạy lệnh sau để khởi động Client Test Phase 3:"
 Write-Host "     java -cp target/securechat-server.jar com.securechat.tools.Phase3TestClient localhost 8080 server_identity.pub" -ForegroundColor Cyan

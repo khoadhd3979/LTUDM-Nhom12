@@ -40,11 +40,13 @@ public class ClientHandler implements Runnable {
     public void run() {
         String remote = String.valueOf(socket.getRemoteSocketAddress());
         System.out.println("[CONN] " + remote);
+            
         try (socket;
-             BoundedLineReader reader = new BoundedLineReader(socket.getInputStream(), MAX_FRAME_BYTES);
-             PrintWriter out = new PrintWriter(
-                     new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
+            BoundedLineReader reader = new BoundedLineReader(socket.getInputStream(), MAX_FRAME_BYTES);
+            PrintWriter out = new PrintWriter(
+                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
 
+            socket.setSoTimeout(30000);
             while (true) {
                 String line;
                 try {
@@ -64,6 +66,7 @@ public class ClientHandler implements Runnable {
             releaseSession();
             System.out.println("[DISC] " + remote);
         }
+
     }
 
     private boolean handleLine(String line, PrintWriter out) {
