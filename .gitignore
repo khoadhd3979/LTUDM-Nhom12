@@ -37,3 +37,5 @@ target/
 
 .github/modernize/
 *.ps1
+server_identity.key
+server_identity.pub
