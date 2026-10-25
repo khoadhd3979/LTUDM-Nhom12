@@ -3,6 +3,7 @@ mvn -q clean package
 
 # 2. KHỞI ĐỘNG SERVER (MỞ CỬA SỔ MỚI)
 java -jar target/securechat-server.jar
+java -jar target/securechat-server.jar
 
 # 3. TEST PHASE 1 (NỀN TẢNG TCP)
 
