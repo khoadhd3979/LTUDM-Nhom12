@@ -28,10 +28,11 @@ target/
 *.log
 .vscode/
 .idea/
+*.iml
 *.class
 .vscode/settings.json
 
-.key
+*.key
 .pub
 .yml
 
