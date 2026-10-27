@@ -39,3 +39,10 @@ target/
 *.ps1
 server_identity.key
 server_identity.pub
+
+.env
+server_identity.key
+target/
+.idea/
+*.iml
+/legacy
