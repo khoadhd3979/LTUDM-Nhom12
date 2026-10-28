@@ -1,7 +1,9 @@
-package com.securechat.security;
+package com.securechat.client.security;
 
 import com.securechat.common.protocol.Packet;
 import com.securechat.common.protocol.ProtocolSerializer;
+import com.securechat.security.AESUtil;
+import com.securechat.security.SecureSession;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -57,3 +59,4 @@ public final class SecureTransport {
         return ("SecureChat-SecureEnvelope-v1|" + direction + "|" + seq).getBytes(StandardCharsets.UTF_8);
     }
 }
+

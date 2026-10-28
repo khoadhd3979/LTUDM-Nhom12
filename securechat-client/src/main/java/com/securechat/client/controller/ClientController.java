@@ -2,6 +2,7 @@ package com.securechat.client.controller;
 
 import com.securechat.client.gui.*;
 import com.securechat.client.network.NetworkManager;
+import com.securechat.client.security.SecureTransport;
 import com.securechat.client.validation.InputValidator;
 import com.securechat.common.protocol.MessageType;
 import com.securechat.common.protocol.Packet;
