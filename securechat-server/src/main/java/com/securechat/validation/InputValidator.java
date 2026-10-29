@@ -2,6 +2,8 @@ package com.securechat.validation;
 
 import com.securechat.exception.BusinessException;
 
+import java.nio.CharBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.Locale;
@@ -14,7 +16,7 @@ public final class InputValidator {
             Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
     private static final Pattern OTP_6 = Pattern.compile("^\\d{6}$");
     private static final int PASSWORD_MIN = 8;
-    private static final int PASSWORD_MAX = 72;   // BCrypt max
+    private static final int PASSWORD_MAX = 72;   // BCrypt max UTF-8 bytes
     private static final int FULLNAME_MIN = 1;
     private static final int FULLNAME_MAX = 120;
     private static final Set<String> GENDERS = Set.of("MALE", "FEMALE", "OTHER");
@@ -35,8 +37,9 @@ public final class InputValidator {
             throw new BusinessException("PASSWORD_REQUIRED", "Mật khẩu bắt buộc");
         if (pwd.length() < PASSWORD_MIN)
             throw new BusinessException("PASSWORD_TOO_SHORT", "Mật khẩu phải từ " + PASSWORD_MIN + " ký tự");
-        if (pwd.length() > PASSWORD_MAX)
-            throw new BusinessException("PASSWORD_TOO_LONG", "Mật khẩu tối đa " + PASSWORD_MAX + " ký tự");
+        int passwordBytes = StandardCharsets.UTF_8.encode(CharBuffer.wrap(pwd)).remaining();
+        if (passwordBytes > PASSWORD_MAX)
+            throw new BusinessException("PASSWORD_TOO_LONG", "Mật khẩu tối đa " + PASSWORD_MAX + " byte UTF-8");
     }
 
     /** @return trimmed full name. */
