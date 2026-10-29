@@ -4,42 +4,58 @@ Tài liệu này quy định luồng làm việc với Git/GitHub, cấu trúc t
 
 ---
 
-## 1. Cấu trúc Thư mục Dự kiến
+## 1. Cấu trúc Thư mục Chuẩn (Multi-Module Maven)
 
-Dự án được chia thành 2 module độc lập (Client và Server) nằm chung trong một Repository để dễ quản lý chung một CSDL và giao thức chuẩn.
+Dự án sử dụng mô hình Maven Multi-Module gồm 3 module độc lập nằm chung một Repository: `securechat-common` (giao thức và crypto dùng chung), `securechat-server` (Backend do Khoa phụ trách) và `securechat-client` (Frontend Swing do Sự phụ trách).
 
 ```text
 Secure_Real-time_Messaging_App/
 │
-├── securechat-server/          # CÔNG VIỆC CỦA KHOA (Chuẩn Maven)
-│   ├── .env                    # (Khoa tự tạo) Chứa biến môi trường cá nhân (KHÔNG GỬI LÊN GIT)
-│   ├── .env.example            # Chứa các biến mẫu để Sự biết cấu hình (Gửi lên Git)
-│   ├── pom.xml                 # Cấu hình Maven (Thư viện: SQL Server, Jackson, BCrypt, Dotenv)
+├── pom.xml                     # Parent POM quản lý versions và dependencyManagement
+├── AGENTS.md                   # Quy chuẩn kỹ thuật bất biến
+├── README.md                   # Hướng dẫn tổng quan
+├── .env.example                # Mẫu biến môi trường (Gửi lên Git, không chứa bí mật)
+├── server_identity.pub         # Khóa công khai Server để Client ghim khóa (Key Pinning)
+│
+├── securechat-common/          # MODULE DÙNG CHUNG (Giao thức & Crypto)
+│   ├── pom.xml
 │   └── src/main/java/com/securechat/
-│       ├── bll/                # Nghiệp vụ: UserBLL, GroupBLL
-│       ├── common/protocol/    # Giao thức chung: Packet, MessageType, ProtocolSerializer
-│       ├── config/             # Cấu hình: AppConfig (đọc từ .env)
-│       ├── dao/                # Truy vấn CSDL: UserDAO, DBConnection (Facade)
-│       ├── dto/                # Ánh xạ CSDL: UserDTO
-│       ├── security/           # Bảo mật: SecurityUtils (BCrypt)
-│       ├── server/             # Mạng TCP: ServerMain, ClientHandler
-│       └── utils/              # Tiện ích: MailUtils
+│       ├── common/protocol/    # Packet, MessageType, ProtocolSerializer
+│       └── security/           # AESUtil, HKDFUtil, RSAUtil, SecureSession, SecurityUtils
 │
-├── securechat-client/          # CÔNG VIỆC CỦA SỰ (Nên dùng Maven để tái sử dụng thư viện chung)
-│   ├── pom.xml                 # Cấu hình Maven (Jackson để parse JSON)
-│   └── src/main/java/com/securechat/client/
-│       ├── controller/         # Xử lý sự kiện từ GUI
-│       ├── gui/                # Giao diện Java Swing
-│       ├── network/            # Socket Client, gửi nhận JSON theo dòng (NDJSON)
-│       └── ...
+├── securechat-server/          # MODULE SERVER (Khoa phụ trách)
+│   ├── pom.xml                 # Cấu hình Maven Server (MSSQL, jBCrypt, Jakarta Mail, Dotenv)
+│   └── src/main/java/com/securechat/
+│       ├── server/             # ServerMain, ClientHandler, ClientConnectionManager
+│       ├── bll/                # AuthService, UserBLL
+│       ├── dao/                # UserDAO, EmailOtpDAO, DBConnection
+│       ├── dto/                # UserDTO
+│       ├── config/             # AppConfig
+│       ├── validation/         # InputValidator backend
+│       ├── utils/              # MailUtils
+│       ├── exception/          # BusinessException
+│       ├── security/           # PasswordHasher, ServerIdentityKeyManager, SecureTransport
+│       └── tools/              # Phase3TestClient
 │
-├── database/                   # Chứa script CSDL
-│   └── schema_mssql.sql        # File tạo bảng SQL Server
+├── securechat-client/          # MODULE CLIENT (Sự phụ trách)
+│   ├── pom.xml                 # Cấu hình Maven Client (Shade ra securechat-client.jar)
+│   └── src/
+│       ├── main/resources/
+│       │   └── server_identity.pub  # Đóng gói kèm JAR
+│       └── main/java/com/securechat/client/
+│           ├── ClientMain.java # Điểm khởi chạy Client chính
+│           ├── controller/     # ClientController
+│           ├── gui/            # MainFrame, LoginPanel, RegisterPanel, OTPPanel, ChatPanel
+│           ├── network/        # NetworkManager, FileChunkUtils
+│           ├── security/       # SecureTransport (C2S/S2C)
+│           └── validation/     # InputValidator frontend
 │
-├── _legacy/                    # Nơi chứa các file code cũ, rác, code backup (Không biên dịch)
-├── .gitignore                  # Bỏ qua thư mục target/, .env
-└── docs/                       # Tài liệu (PROTOCOL.md, WORKFLOW.md)
-
+├── database/                   # Chứa script và tài liệu CSDL
+│   ├── schema_mssql.sql        # File tạo bảng SQL Server (Phase 1 & 2)
+│   └── README.md               # Tài liệu CSDL & mẫu thiết kế Phase 4
+│
+├── .gitignore                  # Bỏ qua thư mục target/, *.class, .env, *.key
+└── docs/                       # Tài liệu (protocol.md, ScriptTest_CML.md, ...)
 ```
 
 ---
@@ -76,35 +92,18 @@ Khi một chức năng đã chạy thông suốt, tiến hành gộp vào nhánh
 git checkout main
 git pull origin main
 git checkout feature/ten-nhanh-cua-ban
-
 ```
-
-
 
 ---
 
 ## 5. Phân công Công việc Chi tiết
 
-**Chiến lược:** Xây dựng luồng nhắn tin thời gian thực (text thô) trước, sau đó tích hợp mã hóa (RSA/AES) vào sau.
+**Chiến lược:** Xây dựng luồng đăng ký/OTP/đăng nhập và bắt tay mã hóa trước (Phase 1-3), sau đó tích hợp nhắn tin và chia sẻ file (Phase 4-5).
 
 | Giai đoạn | Khoa (Server & Database) `feature/khoa-server-db` | Sự (Client UI & Payload) `feature/su-client-gui` |
 | --- | --- | --- |
-| **1. Nền tảng & DB** | Thiết kế CSDL (bảng User, Message). Viết DTO/DAO/BLL. Tích hợp API Email OTP. | Dùng Swing vẽ form Đăng nhập/Đăng ký. Validate dữ liệu. Tạo Socket Client kết nối. |
-| **2. Đa luồng & Chat 1-1** | Dựng Server Multithreading quản lý danh sách Client. Viết hàm lưu/tải lịch sử chat. | Vẽ UI Dashboard & Khung chat. Gửi/nhận tin nhắn text thô qua Socket và render lên UI. |
-| **3. Mở rộng & File** | Xử lý logic tạo nhóm, thành viên. Tạo luồng stream nhận, lưu file đính kèm/sticker. | Vẽ UI tạo nhóm. Viết thuật toán phân mảnh gói dữ liệu (packet) để gửi file < 1MB. |
-| **4. Ghép Mã hóa** | Cài đặt thuật toán RSA (Sinh khóa / Cấp phát khóa phiên). | Đóng gói hàm gửi/nhận qua class `SecurityUtils` (Mã hóa đối xứng AES). |
-| **5. Trạng thái & UI** | Xử lý logic Broadcast báo hiệu Online/Offline. Ghi Log hệ thống. API Block user. | Thiết kế UI tải tin nhắn cũ. Cập nhật trạng thái "đã xem". Chức năng chặn (Block). |
-
----
-
-## 6. Quy chuẩn Giao tiếp Dữ liệu (Packet Concept)
-
-Luồng dữ liệu giữa Client và Server thống nhất dùng chuỗi phân cách theo cú pháp chuẩn để tiện phân tích (parse) và đắp mã hóa sau này.
-
-* **Cú pháp dự kiến:** `[ACTION]|[SENDER]|[DATA1]|[DATA2]`
-* *Ví dụ Đăng nhập:* `LOGIN|su@gmail.com|123456`
-* *Ví dụ Gửi tin:* `CHAT_P2P|su@gmail.com|khoa@gmail.com|Hello bro`
-
-```
-
-```
+| **Phase 1: Nền tảng TCP & NDJSON** | Dựng TCP Server đa luồng, framing 1MB, ping-pong, cấu hình .env. | Kết nối TCP, gửi/nhận NDJSON bất đồng bộ không nghẽn EDT. |
+| **Phase 2: Auth & Email OTP** | CSDL `dbo.users`, `dbo.email_otp`, băm BCrypt, gửi mail OTP qua Gmail SMTP. | Vẽ UI LoginPanel, RegisterPanel, OTPPanel, validate dữ liệu đầu vào. |
+| **Phase 3: Secure Transport** | RSA 2048 ephemeral keypair, RSASSA-PSS chữ ký định danh, HKDF, AES-256-GCM. | Xác minh chữ ký định danh Server (Key Pinning), bắt tay trao đổi khóa, bọc SECURE_MESSAGE. |
+| **Phase 4: Chat 1-1, Nhóm & File** | Bảng `dbo.messages`, `dbo.groups`, lưu trữ và broadcast tin nhắn, nhận chunk file 256 KiB. | Hoàn thiện ChatPanel, gửi tin nhắn, chia nhỏ file bằng `FileChunkUtils`, hiển thị lịch sử chat. |
+| **Phase 5: Trạng thái & Bảo mật nâng cao** | Broadcast Online/Offline, Block user, quản lý danh sách bạn bè. | Danh sách bạn bè/nhóm trực tuyến, cập nhật trạng thái đã xem, giao diện chặn người dùng. |

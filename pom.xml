@@ -6,120 +6,110 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>com.securechat</groupId>
-    <artifactId>securechat-server</artifactId>
+    <artifactId>securechat-parent</artifactId>
     <version>1.0.0</version>
-    <packaging>jar</packaging>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>securechat-common</module>
+        <module>securechat-server</module>
+        <module>securechat-client</module>
+    </modules>
 
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <jackson.version>2.17.2</jackson.version>
-        <mssql.version>13.2.1.jre11</mssql.version>
+        <mssql.version>12.8.1.jre11</mssql.version>
         <jbcrypt.version>0.4</jbcrypt.version>
-        <jsoup.version>1.18.1</jsoup.version>
         <jakarta.mail.version>2.0.1</jakarta.mail.version>
         <slf4j.version>2.0.13</slf4j.version>
+        <dotenv.version>3.0.0</dotenv.version>
+        <junit.version>5.10.2</junit.version>
+        <compiler.plugin.version>3.13.0</compiler.plugin.version>
+        <shade.plugin.version>3.6.0</shade.plugin.version>
     </properties>
 
-    <dependencies>
-        <!-- SQL Server JDBC (khớp jar có sẵn trong lib/) -->
-        <dependency>
-            <groupId>com.microsoft.sqlserver</groupId>
-            <artifactId>mssql-jdbc</artifactId>
-            <version>${mssql.version}</version>
-        </dependency>
+    <dependencyManagement>
+        <dependencies>
+            <!-- Module nội bộ -->
+            <dependency>
+                <groupId>com.securechat</groupId>
+                <artifactId>securechat-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
 
-        <!-- JSON protocol -->
-        <dependency>
-            <groupId>com.fasterxml.jackson.core</groupId>
-            <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
-        </dependency>
+            <!-- JSON Protocol -->
+            <dependency>
+                <groupId>com.fasterxml.jackson.core</groupId>
+                <artifactId>jackson-databind</artifactId>
+                <version>${jackson.version}</version>
+            </dependency>
 
-        <!-- Password hash (Phase 2) -->
-        <dependency>
-            <groupId>org.mindrot</groupId>
-            <artifactId>jbcrypt</artifactId>
-            <version>${jbcrypt.version}</version>
-        </dependency>
+            <!-- SQL Server JDBC -->
+            <dependency>
+                <groupId>com.microsoft.sqlserver</groupId>
+                <artifactId>mssql-jdbc</artifactId>
+                <version>${mssql.version}</version>
+            </dependency>
 
-        <!-- Sanitize HTML cho nội dung tin nhắn (Phase 4) -->
-        <dependency>
-            <groupId>org.jsoup</groupId>
-            <artifactId>jsoup</artifactId>
-            <version>${jsoup.version}</version>
-        </dependency>
+            <!-- Password hash (Phase 2) -->
+            <dependency>
+                <groupId>org.mindrot</groupId>
+                <artifactId>jbcrypt</artifactId>
+                <version>${jbcrypt.version}</version>
+            </dependency>
 
-        <!-- Email OTP (Phase 2) -->
-        <dependency>
-            <groupId>com.sun.mail</groupId>
-            <artifactId>jakarta.mail</artifactId>
-            <version>${jakarta.mail.version}</version>
-        </dependency>
+            <!-- JavaMail gửi OTP qua Gmail SMTP (Phase 2) -->
+            <dependency>
+                <groupId>com.sun.mail</groupId>
+                <artifactId>jakarta.mail</artifactId>
+                <version>${jakarta.mail.version}</version>
+            </dependency>
 
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>${slf4j.version}</version>
-        </dependency>
+            <!-- Logging -->
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-simple</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
 
-        <dependency>
-            <groupId>io.github.cdimascio</groupId>
-            <artifactId>dotenv-java</artifactId>
-            <version>3.0.0</version>
-        </dependency>
-        
-    </dependencies>
+            <!-- Dotenv đọc file .env -->
+            <dependency>
+                <groupId>io.github.cdimascio</groupId>
+                <artifactId>dotenv-java</artifactId>
+                <version>${dotenv.version}</version>
+            </dependency>
+
+            <!-- Test Framework -->
+            <dependency>
+                <groupId>org.junit.jupiter</groupId>
+                <artifactId>junit-jupiter</artifactId>
+                <version>${junit.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
-        <finalName>securechat-server</finalName>
-        <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-jar-plugin</artifactId>
-                <version>3.4.2</version>
-                <configuration>
-                    <archive>
-                        <manifest>
-                            <mainClass>com.securechat.server.ServerMain</mainClass>
-                        </manifest>
-                    </archive>
-                </configuration>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.6.0</version>
-                <executions>
-                    <execution>
-                        <phase>package</phase>
-                        <goals><goal>shade</goal></goals>
-                        <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.securechat.server.ServerMain</mainClass>
-                                </transformer>
-                            </transformers>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-        </plugins>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>${compiler.plugin.version}</version>
+                    <configuration>
+                        <release>${maven.compiler.release}</release>
+                        <encoding>${project.build.sourceEncoding}</encoding>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-shade-plugin</artifactId>
+                    <version>${shade.plugin.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
     </build>
 </project>

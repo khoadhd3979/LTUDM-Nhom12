@@ -1,0 +1,62 @@
+package com.securechat.client.security;
+
+import com.securechat.common.protocol.Packet;
+import com.securechat.common.protocol.ProtocolSerializer;
+import com.securechat.security.AESUtil;
+import com.securechat.security.SecureSession;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/** Phía CLIENT: gửi bằng khóa C2S, nhận bằng khóa S2C. Không in khóa/AAD ra console. */
+public final class SecureTransport {
+
+    private final SecureSession session;
+    private final Object outboundLock = new Object();
+
+    public SecureTransport(SecureSession session) { this.session = session; }
+
+    public String encodeOutbound(Packet inner) throws Exception {
+        synchronized (outboundLock) {
+            long seq = session.nextOutboundSeq();
+            byte[] nonce = AESUtil.deriveNonce(seq);
+            byte[] aad = aad("C2S", seq);
+            byte[] plain = ProtocolSerializer.toJson(inner).getBytes(StandardCharsets.UTF_8);
+            byte[] cipher = AESUtil.gcmEncrypt(session.getC2sKey(), nonce, aad, plain);
+
+            Map<String, Object> env = new LinkedHashMap<>();
+            env.put("sequence", seq);
+            env.put("nonce", Base64.getEncoder().encodeToString(nonce));
+            env.put("ciphertext", Base64.getEncoder().encodeToString(cipher));
+            return ProtocolSerializer.toJson(Packet.ok("SECURE_MESSAGE", inner.getRequestId(), env));
+        }
+    }
+
+    public Packet decodeInbound(Packet envelope) throws Exception {
+        Map<String, Object> p = envelope.getPayload();
+        if (p == null) throw new SecurityException("Empty SECURE_MESSAGE payload");
+        Object seqObj = p.get("sequence"), nonceObj = p.get("nonce"), ctObj = p.get("ciphertext");
+        if (!(seqObj instanceof Number) || !(nonceObj instanceof String) || !(ctObj instanceof String))
+            throw new SecurityException("Malformed SECURE_MESSAGE");
+
+        long seq = ((Number) seqObj).longValue();
+        byte[] wireNonce = Base64.getDecoder().decode((String) nonceObj);
+        byte[] cipher = Base64.getDecoder().decode((String) ctObj);
+
+        long expected = session.expectedInboundSeq();
+        if (seq != expected) throw new SecurityException("Replay/ordering: expected " + expected + " got " + seq);
+        if (!Arrays.equals(wireNonce, AESUtil.deriveNonce(seq))) throw new SecurityException("Nonce mismatch");
+
+        byte[] plain = AESUtil.gcmDecrypt(session.getS2cKey(), wireNonce, aad("S2C", seq), cipher);
+        session.advanceInboundSeq(seq);
+        return ProtocolSerializer.fromJson(new String(plain, StandardCharsets.UTF_8));
+    }
+
+    private static byte[] aad(String direction, long seq) {
+        return ("SecureChat-SecureEnvelope-v1|" + direction + "|" + seq).getBytes(StandardCharsets.UTF_8);
+    }
+}
+
