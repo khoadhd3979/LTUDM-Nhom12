@@ -59,9 +59,7 @@ public class ClientController implements NetworkManager.MessageListener {
             entry("OTP_ALREADY_USED", "Mã OTP đã được sử dụng."),
             entry("AUTH_FAILED", "Email hoặc mật khẩu không đúng."),
             entry("ACCOUNT_PENDING", "Tài khoản chưa được kích hoạt bằng OTP."),
-            entry("ACCOUNT_LOCKED", "Tài khoản đã bị khóa."),
-            entry("NOT_LOGGED_IN", "Bạn chưa đăng nhập."),
-            entry("TIMEOUT", "Server không phản hồi. Vui lòng thử lại."));
+            entry("ACCOUNT_LOCKED", "Tài khoản đã bị khóa."));
 
     private static final class Pending {
         final Consumer<Packet> callback;

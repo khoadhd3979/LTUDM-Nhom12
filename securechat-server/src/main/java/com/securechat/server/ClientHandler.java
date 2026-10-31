@@ -296,6 +296,7 @@ public class ClientHandler implements Runnable {
             return Packet.error(reqId, be.getCode());
         } catch (SQLException sqle) {
             System.err.println("[ERROR] inner " + req.getType() + " SQLState=" + sqle.getSQLState());
+            sqle.printStackTrace();       //sự
             return Packet.error(reqId, "DB_ERROR");
         } catch (RuntimeException re) {
             System.err.println("[ERROR] inner " + req.getType() + " "
