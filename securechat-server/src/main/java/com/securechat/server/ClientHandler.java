@@ -40,13 +40,13 @@ public class ClientHandler implements Runnable {
     public void run() {
         String remote = String.valueOf(socket.getRemoteSocketAddress());
         System.out.println("[CONN] " + remote);
-            
-        try (socket;
-            BoundedLineReader reader = new BoundedLineReader(socket.getInputStream(), MAX_FRAME_BYTES);
-            PrintWriter out = new PrintWriter(
-                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
 
-            socket.setSoTimeout(30000);
+        try (socket;
+             BoundedLineReader reader = new BoundedLineReader(socket.getInputStream(), MAX_FRAME_BYTES);
+             PrintWriter out = new PrintWriter(
+                     new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)) {
+
+            socket.setSoTimeout(300_000); // 5 phút — Phase 4 sẽ thêm PING keepalive và có thể giảm
             while (true) {
                 String line;
                 try {
@@ -66,7 +66,6 @@ public class ClientHandler implements Runnable {
             releaseSession();
             System.out.println("[DISC] " + remote);
         }
-
     }
 
     private boolean handleLine(String line, PrintWriter out) {
@@ -91,8 +90,10 @@ public class ClientHandler implements Runnable {
             switch (t) {
                 case MessageType.PING:
                     if (session.getState() == SecureSession.State.ESTABLISHED) {
-                        writePlain(out, Packet.error(req.getRequestId(), "SECURE_REQUIRED"));
-                        return true;
+                        System.err.println("[SEC] plaintext " + req.getType()
+                                + " on ESTABLISHED session for " + socket.getRemoteSocketAddress()
+                                + " — closing connection.");
+                        return false;
                     }
                     writePlain(out, Packet.ok(MessageType.PONG, req.getRequestId(), tsPayload()));
                     return true;
@@ -105,13 +106,17 @@ public class ClientHandler implements Runnable {
 
                 default:
                     if (session.getState() == SecureSession.State.ESTABLISHED) {
-                        writePlain(out, Packet.error(req.getRequestId(), "SECURE_REQUIRED"));
-                        return true;
+                        // Protocol violation — same handling as PING above.
+                        System.err.println("[SEC] plaintext " + req.getType()
+                                + " on ESTABLISHED session for " + socket.getRemoteSocketAddress()
+                                + " — closing connection.");
+                        return false;
                     }
                     if (session.getState() == SecureSession.State.INIT) {
                         writePlain(out, Packet.error(req.getRequestId(), "HANDSHAKE_REQUIRED"));
                         return true;
                     }
+                    // Handshake in progress (HELLO_SENT / KEY_RECEIVED) — unknown plaintext type.
                     writePlain(out, Packet.error(req.getRequestId(), "UNKNOWN_TYPE"));
                     return true;
             }
@@ -210,7 +215,7 @@ public class ClientHandler implements Runnable {
         SecretKey s2c = new SecretKeySpec(Arrays.copyOfRange(okm, 32, 64), "AES");
         session.setC2sKey(c2s);
         session.setS2cKey(s2c);
-        session.setEphemeralPrivate(null);   // wipe reference
+        session.setEphemeralPrivate(null);
         session.setState(SecureSession.State.KEY_RECEIVED);
 
         Map<String, Object> confirmPayload = new LinkedHashMap<>();
@@ -222,7 +227,6 @@ public class ClientHandler implements Runnable {
 
     private boolean handleSecure(Packet req, PrintWriter out) throws Exception {
         if (session.getState() == SecureSession.State.KEY_RECEIVED) {
-            // Expect client's HANDSHAKE_CONFIRM
             Packet inner = transport.decodeInbound(req);
             if (!isClientConfirm(inner)) {
                 writePlain(out, Packet.error(req.getRequestId(), "KEY_CONFIRM_INVALID"));
