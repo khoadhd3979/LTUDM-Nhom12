@@ -183,7 +183,17 @@ public class ChatPanel extends JPanel {
     private void chooseAndSendFile() {
         if (currentTarget == null) return;
         JFileChooser fc = new JFileChooser();
-        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) controller.sendFile(currentTarget, isGroupChat, fc.getSelectedFile());
+        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            File selectedFile = fc.getSelectedFile();
+
+            String err = InputValidator.attachment(selectedFile);
+            if (err != null) {
+                JOptionPane.showMessageDialog(this, err, "Lỗi file", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            controller.sendFile(currentTarget, isGroupChat, selectedFile);
+        }
     }
     private void sendText() {
         if (currentTarget == null) return;
