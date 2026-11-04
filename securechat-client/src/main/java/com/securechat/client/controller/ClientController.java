@@ -294,6 +294,12 @@ public class ClientController implements NetworkManager.MessageListener {
     public void blockTarget(String target, boolean isGroup) {
         sendQuietly(Packet.request("BLOCK_USER", UUID.randomUUID().toString(), Map.of("target", target, "targetType", isGroup ? "GROUP" : "USER")));
     }
+    public void addFriend(String friendEmail) {
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("friendEmail", friendEmail);
+        chatPanel.appendMessage("[Bạn bè]: Đã gửi yêu cầu thêm '" + friendEmail + "' vào danh bạ.");
+        sendQuietly(Packet.request("ADD_FRIEND", UUID.randomUUID().toString(), pl));
+    }
 
     public void markConversationSeen(String target, boolean isGroup) {
         sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(), Map.of("target", target, "isGroup", isGroup, "status", "SEEN")));

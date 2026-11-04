@@ -61,10 +61,18 @@ public class ChatPanel extends JPanel {
                 selectTarget(friendList.getSelectedValue().split(" ")[0].trim(), false);
             }
         });
-        JButton btnAddFriend = new JButton("+ Nhập Email Chat");
+        JButton btnAddFriend = new JButton("+ Thêm Bạn Bè / Chat");
         btnAddFriend.addActionListener(e -> {
-            String email = JOptionPane.showInputDialog(this, "Nhập email:");
-            if (email != null && !email.trim().isEmpty()) { addOrUpdateFriend(email, "ONLINE"); selectTarget(email, false); }
+            String email = JOptionPane.showInputDialog(this, "Nhập email người muốn thêm bạn/nhắn tin:");
+            if (email != null && !email.trim().isEmpty()) {
+                email = email.trim();
+                String err = InputValidator.email(email);
+                if (err != null) {
+                    JOptionPane.showMessageDialog(this, err, "Lỗi", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                controller.addFriend(email);
+            }
         });
         friendPanel.add(new JScrollPane(friendList), BorderLayout.CENTER);
         friendPanel.add(btnAddFriend, BorderLayout.SOUTH);
