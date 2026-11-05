@@ -20,6 +20,7 @@
             <groupId>com.securechat</groupId>
             <artifactId>securechat-common</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -97,4 +98,3 @@
         </plugins>
     </build>
 </project>
-

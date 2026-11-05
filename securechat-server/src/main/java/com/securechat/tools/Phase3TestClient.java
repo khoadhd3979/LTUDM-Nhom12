@@ -15,6 +15,7 @@ import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.*;
+import com.securechat.common.protocol.MessageType;
 
 /**
  * Reference secure client. Reads one JSON line from stdin, sends encrypted,
@@ -150,12 +151,6 @@ public class Phase3TestClient {
 
     private static String b64(byte[] b) { return Base64.getEncoder().encodeToString(b); }
 
-    private static class MessageType {
-        static final String CLIENT_HELLO = "CLIENT_HELLO";
-        static final String SERVER_HELLO = "SERVER_HELLO";
-        static final String KEY_EXCHANGE = "KEY_EXCHANGE";
-        static final String HANDSHAKE_CONFIRM = "HANDSHAKE_CONFIRM";
-    }
 
 }
 

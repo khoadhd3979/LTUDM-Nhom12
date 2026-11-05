@@ -12,7 +12,7 @@ public class MainFrame extends JFrame {
     private final JPanel mainPanel = new JPanel(cardLayout);
 
     public MainFrame(ClientController controller) {
-        setTitle("SecureChat - E2EE Messaging");
+        setTitle("SecureChat - Secure Transport");
         setSize(900, 650);
         setLocationRelativeTo(null);
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);

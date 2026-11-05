@@ -61,7 +61,14 @@ public class ClientController implements NetworkManager.MessageListener {
             entry("ACCOUNT_PENDING", "Tài khoản chưa được kích hoạt bằng OTP."),
             entry("ACCOUNT_LOCKED", "Tài khoản đã bị khóa."),
             entry("NOT_LOGGED_IN", "Bạn chưa đăng nhập."),
-            entry("TIMEOUT", "Server không phản hồi. Vui lòng thử lại."));
+            entry("TIMEOUT", "Server không phản hồi. Vui lòng thử lại."),
+            entry("SECURE_REQUIRED", "Kênh bảo mật đã thiết lập — vui lòng gửi lại trong SECURE_MESSAGE."),
+            entry("HANDSHAKE_REQUIRED", "Cần hoàn tất bắt tay bảo mật trước khi gửi yêu cầu."),
+            entry("SECURITY_ERROR", "Lỗi bảo mật phiên kết nối. Vui lòng kết nối lại."),
+            entry("INVALID_STATE", "Trạng thái bắt tay không hợp lệ. Vui lòng kết nối lại."),
+            entry("HELLO_INVALID", "Yêu cầu bắt tay sai định dạng."),
+            entry("KEY_EXCHANGE_INVALID", "Trao đổi khóa thất bại. Vui lòng kết nối lại."),
+            entry("KEY_CONFIRM_INVALID", "Xác nhận khóa phiên thất bại. Vui lòng kết nối lại."));
 
     private static final class Pending {
         final Consumer<Packet> callback;

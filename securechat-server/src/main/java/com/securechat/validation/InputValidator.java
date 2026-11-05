@@ -82,4 +82,30 @@ public final class InputValidator {
     public static boolean isBlank(String s) { 
         return s == null || s.isBlank(); 
     }
+
+    /** @return content đã trim, non-empty, ≤ 4000 ký tự. */
+    public static String validateMessageContent(String content) {
+        if (content == null || content.isBlank())
+            throw new BusinessException("CONTENT_INVALID", "Nội dung tin nhắn không được để trống");
+        String trimmed = content.trim();
+        if (trimmed.length() > 4000)
+            throw new BusinessException("CONTENT_INVALID", "Tin nhắn tối đa 4000 ký tự");
+        return trimmed;
+    }
+
+    /** @return tên nhóm đã trim, 1..100 ký tự (khớp CK_groups_name_len). */
+    public static String validateGroupName(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new BusinessException("GROUP_NAME_INVALID", "Tên nhóm không được để trống");
+        String trimmed = raw.trim();
+        if (trimmed.length() > 100)
+            throw new BusinessException("GROUP_NAME_INVALID", "Tên nhóm tối đa 100 ký tự");
+        return trimmed;
+    }
+
+    /** @return limit trong [1, 100], default 30 nếu <= 0. */
+    public static int normalizeHistoryLimit(int limit) {
+        if (limit <= 0) return 30;
+        return Math.min(limit, 100);
+    }
 }

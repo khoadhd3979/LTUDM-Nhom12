@@ -2,6 +2,15 @@ package com.securechat.utils;
 
 import java.util.regex.Pattern;
 
+
+/**
+ * @deprecated Not referenced anywhere. Superseded by
+ *             {@link com.securechat.validation.InputValidator}.
+ *             Slated for removal after audit. Do not add new callers.
+ */
+@Deprecated(forRemoval = true)
+
+
 public class ValidateUtils {
     private static final String EMAIL_REGEX = "^[A-Za-z0-9+_.-]+@(.+)$";
     private static final String DATE_REGEX = "^\\d{4}-\\d{2}-\\d{2}$";

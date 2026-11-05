@@ -21,7 +21,12 @@ public final class FileChunkUtils {
     }
 
     public static List<byte[]> splitFileIntoChunks(File file, int chunkSize) throws IOException {
+        if (chunkSize <= 0 || chunkSize > MAX_CHUNK_SIZE) {
+            throw new IllegalArgumentException(
+                "chunkSize must be in (0, " + MAX_CHUNK_SIZE + "], got: " + chunkSize);
+        }
         List<byte[]> chunks = new ArrayList<>();
+        
         try (FileInputStream fis = new FileInputStream(file)) {
             byte[] buffer = new byte[chunkSize];
             int bytesRead;
@@ -37,5 +42,7 @@ public final class FileChunkUtils {
         }
         return chunks;
     }
+
+    
 }
 
