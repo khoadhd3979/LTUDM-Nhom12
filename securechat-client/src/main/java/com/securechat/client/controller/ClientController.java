@@ -25,10 +25,7 @@ import javax.swing.Timer;
 
 import static java.util.Map.entry;
 
-/**
- * Điều phối Client theo Protocol v0.2 (Phase 2: REGISTER, VERIFY_OTP, LOGIN, LOGOUT).
- * Mọi hàm đều chạy trên EDT (NetworkManager đã chuyển callback về EDT).
- */
+
 public class ClientController implements NetworkManager.MessageListener {
 
     private static final int HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -59,7 +56,11 @@ public class ClientController implements NetworkManager.MessageListener {
             entry("OTP_ALREADY_USED", "Mã OTP đã được sử dụng."),
             entry("AUTH_FAILED", "Email hoặc mật khẩu không đúng."),
             entry("ACCOUNT_PENDING", "Tài khoản chưa được kích hoạt bằng OTP."),
-            entry("ACCOUNT_LOCKED", "Tài khoản đã bị khóa."));
+            entry("ACCOUNT_LOCKED", "Tài khoản đã bị khóa."),
+            entry("UNAUTHENTICATED", "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại."),
+            entry("NOT_GROUP_ADMIN", "Bạn không có quyền quản trị viên trong nhóm này."),
+            entry("ALREADY_GROUP_MEMBER", "Người dùng đã nằm trong nhóm này."),
+            entry("DB_ERROR", "Lỗi cơ sở dữ liệu trên máy chủ."));
 
     private static final class Pending {
         final Consumer<Packet> callback;
@@ -161,6 +162,14 @@ public class ClientController implements NetworkManager.MessageListener {
             loggedIn = true;
             chatPanel.setUser(email);
             mainFrame.showPanel("CHAT");
+
+            // Yêu cầu tải danh sách nhóm sau khi đăng nhập thành công
+            request(MessageType.FETCH_MY_GROUPS, new HashMap<>(), resGroup -> {
+                if (isOk(resGroup)) {
+                    // TODO: Xử lý dữ liệu trả về và hiển thị lên danh sách nhóm nếu cần
+                }
+            });
+
         } else if ("ACCOUNT_PENDING".equals(r.getError())) {
             pendingEmail = email;
             otpPanel.setEmail(email);
@@ -241,9 +250,16 @@ public class ClientController implements NetworkManager.MessageListener {
 
     public void sendChatMessage(String target, boolean isGroup, String content) {
         String msgId = UUID.randomUUID().toString();
-        Map<String, Object> pl = new HashMap<>(); pl.put("messageId", msgId); pl.put(isGroup ? "groupName" : "receiver", target); pl.put("msgType", "TEXT"); pl.put("content", content);
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("messageId", msgId);
+        pl.put(isGroup ? "groupName" : "receiver", target);
+        pl.put("msgType", "TEXT");
+        pl.put("content", content);
+
         chatPanel.appendMessage((isGroup ? "[Nhóm " : "[Tới ") + target + "]: " + content);
-        sendQuietly(Packet.request(isGroup ? "SEND_GROUP_MESSAGE" : "SEND_MESSAGE", msgId, pl));
+
+        String type = isGroup ? MessageType.SEND_GROUP_MESSAGE : MessageType.SEND_DIRECT_MESSAGE;
+        sendQuietly(Packet.request(type, msgId, pl));
     }
 
     public void sendFile(String target, boolean isGroup, File file) {
@@ -257,7 +273,8 @@ public class ClientController implements NetworkManager.MessageListener {
             }
         } catch (Exception e) { showError("Lỗi chia file: " + e.getMessage()); }
     }
-    // Biến lưu trữ file nhận được (Khai báo tạm ở đây hoặc đưa lên đầu class đều được)
+
+    // Biến lưu trữ file nhận được
     private byte[] lastCompleteFileBytes;
     private String lastCompleteFileName;
 
@@ -285,10 +302,10 @@ public class ClientController implements NetworkManager.MessageListener {
         sendQuietly(Packet.request("SEND_STICKER", UUID.randomUUID().toString(), pl));
     }
 
-    public void createGroup(String name) { sendQuietly(Packet.request("CREATE_GROUP", UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.addGroupToList(name); }
+    public void createGroup(String name) { sendQuietly(Packet.request(MessageType.CREATE_GROUP, UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.addGroupToList(name); }
     public void joinGroup(String name) { sendQuietly(Packet.request("JOIN_GROUP", UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.addGroupToList(name); }
     public void leaveGroup(String name) { sendQuietly(Packet.request("LEAVE_GROUP", UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.removeGroupFromList(name); }
-    public void addGroupMember(String grp, String email) { sendQuietly(Packet.request("ADD_GROUP_MEMBER", UUID.randomUUID().toString(), Map.of("groupName", grp, "memberEmail", email))); }
+    public void addGroupMember(String grp, String email) { sendQuietly(Packet.request(MessageType.ADD_GROUP_MEMBER, UUID.randomUUID().toString(), Map.of("groupName", grp, "memberEmail", email))); }
     public void removeGroupMember(String grp, String email) { sendQuietly(Packet.request("REMOVE_GROUP_MEMBER", UUID.randomUUID().toString(), Map.of("groupName", grp, "memberEmail", email))); }
 
     public void blockTarget(String target, boolean isGroup) {
@@ -305,8 +322,36 @@ public class ClientController implements NetworkManager.MessageListener {
         sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(), Map.of("target", target, "isGroup", isGroup, "status", "SEEN")));
     }
 
-    public void loadMessageHistory(String target, boolean isGroup) {
-        sendQuietly(Packet.request("LOAD_HISTORY", UUID.randomUUID().toString(), Map.of("target", target, "isGroup", isGroup, "pageSize", 20)));
+    public void fetchDirectHistory(String targetUserId, Long beforeMessageId) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("userId", targetUserId);
+        if (beforeMessageId != null) {
+            payload.put("beforeMessageId", beforeMessageId);
+        }
+
+        request(MessageType.FETCH_DIRECT_HISTORY, payload, response -> {
+            if (isOk(response)) {
+                // TODO: Bóc tách danh sách tin nhắn từ response.getPayload()
+            } else {
+                showServerError(response);
+            }
+        });
+    }
+
+    public void fetchGroupHistory(String groupId, Long beforeMessageId) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("groupId", groupId);
+        if (beforeMessageId != null) {
+            payload.put("beforeMessageId", beforeMessageId);
+        }
+
+        request(MessageType.FETCH_GROUP_HISTORY, payload, response -> {
+            if (isOk(response)) {
+                // TODO: Xử lý hiển thị tin nhắn nhóm
+            } else {
+                showServerError(response);
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -437,7 +482,18 @@ public class ClientController implements NetworkManager.MessageListener {
     }
 
     private void sendQuietly(Packet inner) {
-        try { network.sendMessage(transport.encodeOutbound(inner)); } catch (Exception ignored) {}
+        try {
+            if (transport == null || state != ConnectionState.SECURE_READY) {
+                throw new java.io.IOException("Socket chưa kết nối.");
+            }
+            network.sendMessage(transport.encodeOutbound(inner));
+        } catch (Exception e) {
+            System.err.println("[Lỗi gửi mạng]: " + e.getMessage());
+            e.printStackTrace();
+            SwingUtilities.invokeLater(() -> {
+                chatPanel.appendMessage("[Lỗi mạng]: Không thể gửi tin nhắn. " + e.getMessage());
+            });
+        }
     }
 
     @Override
@@ -496,14 +552,17 @@ public class ClientController implements NetworkManager.MessageListener {
 
         String type = inner.getType() != null ? inner.getType() : "";
         switch (type) {
-            case "SEND_MESSAGE", "SEND_GROUP_MESSAGE", "SEND_STICKER" -> {
+            case MessageType.PUSH_DIRECT_MESSAGE, MessageType.PUSH_GROUP_MESSAGE -> {
                 String sender = (String) pl.getOrDefault("sender", "Ai đó");
                 String content = (String) pl.getOrDefault("content", "");
-                String group = (String) pl.get("groupName");
-                if (group != null) chatPanel.appendMessage("[Nhóm " + group + "] " + sender + ": " + content);
-                else chatPanel.appendMessage("[Từ " + sender + "]: " + content);
 
-                // Trả về gói ĐÃ NHẬN (Yêu cầu STT 11)
+                if (MessageType.PUSH_GROUP_MESSAGE.equals(type)) {
+                    String group = (String) pl.get("groupName");
+                    chatPanel.appendMessage("[Nhóm " + group + "] " + sender + ": " + content);
+                } else {
+                    chatPanel.appendMessage("[Từ " + sender + "]: " + content);
+                }
+
                 if (pl.get("messageId") != null) {
                     sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(),
                             Map.of("messageId", pl.get("messageId"), "status", "DELIVERED")));
