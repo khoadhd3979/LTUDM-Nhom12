@@ -12,14 +12,20 @@ import com.securechat.security.*;
 import javax.crypto.spec.SecretKeySpec;
 import javax.swing.*;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.spec.X509EncodedKeySpec;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import javax.swing.Timer;
 
@@ -30,6 +36,7 @@ public class ClientController implements NetworkManager.MessageListener {
 
     private static final int HANDSHAKE_TIMEOUT_MS = 10_000;
     private static final int REQUEST_TIMEOUT_MS = 15_000;
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm dd/MM");
 
     private enum ConnectionState { DISCONNECTED, HANDSHAKING, SECURE_READY }
 
@@ -60,13 +67,18 @@ public class ClientController implements NetworkManager.MessageListener {
             entry("UNAUTHENTICATED", "Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại."),
             entry("NOT_GROUP_ADMIN", "Bạn không có quyền quản trị viên trong nhóm này."),
             entry("ALREADY_GROUP_MEMBER", "Người dùng đã nằm trong nhóm này."),
-            entry("DB_ERROR", "Lỗi cơ sở dữ liệu trên máy chủ."));
+            entry("DB_ERROR", "Lỗi cơ sở dữ liệu trên máy chủ."),
+            entry("TIMEOUT", "Máy chủ không phản hồi. Vui lòng thử lại."),
+            entry("UNKNOWN_TYPE", "Máy chủ không hỗ trợ yêu cầu này."));
 
     private static final class Pending {
         final Consumer<Packet> callback;
         final Timer timer;
         Pending(Consumer<Packet> cb, Timer t) { callback = cb; timer = t; }
     }
+
+    /** Một trang lịch sử (server trả DESC theo message_id). */
+    public record HistoryPage(List<Map<String, Object>> messages, boolean hasMore, Long nextCursor) {}
 
     private final NetworkManager network = new NetworkManager();
     private final MainFrame mainFrame;
@@ -92,7 +104,13 @@ public class ClientController implements NetworkManager.MessageListener {
     private Runnable afterSecure;
     private Runnable discardAction;
     private Timer handshakeTimer;
-    private final Map<String, Pending> pending = new HashMap<>();
+    private final Map<String, Pending> pending = new ConcurrentHashMap<>();
+
+    /** Khóa gửi: encodeOutbound dùng số thứ tự nên chỉ được gọi tuần tự. */
+    private final Object sendLock = new Object();
+
+    /** groupName -> groupId (nạp từ FETCH_MY_GROUPS). */
+    private final Map<String, Long> groupIdByName = new HashMap<>();
 
     public ClientController() {
         network.setListener(this);
@@ -118,6 +136,9 @@ public class ClientController implements NetworkManager.MessageListener {
     public void showRegisterScreen() { mainFrame.showPanel("REGISTER"); }
     public void showLoginScreen() { mainFrame.showPanel("LOGIN"); }
     public void showOTPScreen() { mainFrame.showPanel("OTP"); }
+
+    /** Trả về groupId của nhóm theo tên, hoặc null nếu chưa có. */
+    public Long getGroupId(String groupName) { return groupIdByName.get(groupName); }
 
     // ------------------------------------------------------------------
     // Khóa định danh Server (Key Pinning)
@@ -162,14 +183,7 @@ public class ClientController implements NetworkManager.MessageListener {
             loggedIn = true;
             chatPanel.setUser(email);
             mainFrame.showPanel("CHAT");
-
-            // Yêu cầu tải danh sách nhóm sau khi đăng nhập thành công
-            request(MessageType.FETCH_MY_GROUPS, new HashMap<>(), resGroup -> {
-                if (isOk(resGroup)) {
-                    // TODO: Xử lý dữ liệu trả về và hiển thị lên danh sách nhóm nếu cần
-                }
-            });
-
+            loadMyGroups();
         } else if ("ACCOUNT_PENDING".equals(r.getError())) {
             pendingEmail = email;
             otpPanel.setEmail(email);
@@ -178,6 +192,23 @@ public class ClientController implements NetworkManager.MessageListener {
         } else {
             showServerError(r);
         }
+    }
+
+    /** FETCH_MY_GROUPS -> nạp vào danh sách nhóm trên giao diện. */
+    private void loadMyGroups() {
+        request(MessageType.FETCH_MY_GROUPS, new HashMap<>(), res -> {
+            if (!isOk(res)) { showServerError(res); return; }
+            Map<String, Object> pl = res.getPayload();
+            if (pl == null || !(pl.get("groups") instanceof List<?> list)) return;
+            groupIdByName.clear();
+            for (Object o : list) {
+                if (o instanceof Map<?, ?> g) {
+                    String name = String.valueOf(g.get("groupName"));
+                    if (g.get("groupId") != null) groupIdByName.put(name, asLong(g.get("groupId")));
+                    chatPanel.addGroupToList(name);
+                }
+            }
+        });
     }
 
     public void register(String ip, int p, String email, char[] password,
@@ -238,16 +269,22 @@ public class ClientController implements NetworkManager.MessageListener {
         System.exit(0);
     }
 
-    // Các tính năng của Phase 4: Server chưa định nghĩa gói tin nên không gửi gói tự chế.
     // ==============================================================================
-    // THỰC THI 13 YÊU CẦU CHỨC NĂNG CLIENT (STT 1-13) - PHASE 4
+    // CÁC CHỨC NĂNG CLIENT - PHASE 4
+    // Lưu ý: các type không có trong MessageType (UPDATE_PROFILE, FILE_CHUNK, JOIN_GROUP,
+    // LEAVE_GROUP, REMOVE_GROUP_MEMBER, BLOCK_USER, ADD_FRIEND, SEND_STICKER, MESSAGE_STATUS)
+    // sẽ bị Server trả UNKNOWN_TYPE cho đến khi Server hỗ trợ.
     // ==============================================================================
 
     public void updateProfile(String fullName, String gender, String dob) {
-        Map<String, Object> pl = new HashMap<>(); pl.put("fullName", fullName); pl.put("gender", gender); pl.put("dateOfBirth", dob);
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("fullName", fullName);
+        pl.put("gender", gender);
+        pl.put("dateOfBirth", dob);
         sendQuietly(Packet.request("UPDATE_PROFILE", UUID.randomUUID().toString(), pl));
     }
 
+    /** Gửi tin nhắn: chỉ hiển thị lên khung chat khi Server trả OK (Lỗi 1). */
     public void sendChatMessage(String target, boolean isGroup, String content) {
         String msgId = UUID.randomUUID().toString();
         Map<String, Object> pl = new HashMap<>();
@@ -256,25 +293,64 @@ public class ClientController implements NetworkManager.MessageListener {
         pl.put("msgType", "TEXT");
         pl.put("content", content);
 
-        chatPanel.appendMessage((isGroup ? "[Nhóm " : "[Tới ") + target + "]: " + content);
-
         String type = isGroup ? MessageType.SEND_GROUP_MESSAGE : MessageType.SEND_DIRECT_MESSAGE;
-        sendQuietly(Packet.request(type, msgId, pl));
-    }
-
-    public void sendFile(String target, boolean isGroup, File file) {
-        try {
-            java.util.List<byte[]> chunks = com.securechat.client.network.FileChunkUtils.splitFileIntoChunks(file, com.securechat.client.network.FileChunkUtils.DEFAULT_CHUNK_SIZE);
-            String fileId = UUID.randomUUID().toString(); int total = chunks.size();
-            chatPanel.appendMessage("[File]: Đang gửi file '" + file.getName() + "' (" + total + " chunk)...");
-            for (int i = 0; i < total; i++) {
-                Map<String, Object> pl = new HashMap<>(); pl.put("fileId", fileId); pl.put("fileName", file.getName()); pl.put("chunkIndex", i); pl.put("totalChunks", total); pl.put("data", Base64.getEncoder().encodeToString(chunks.get(i))); pl.put(isGroup ? "groupName" : "receiver", target);
-                sendEncrypted(Packet.request("FILE_CHUNK", UUID.randomUUID().toString(), pl));
+        request(type, pl, res -> {
+            if (isOk(res)) {
+                chatPanel.appendMessage((isGroup ? "[Nhóm " : "[Tới ") + target + "]: " + content);
+            } else {
+                chatPanel.appendMessage("[Lỗi gửi tin]: " + errorText(res.getError()));
             }
-        } catch (Exception e) { showError("Lỗi chia file: " + e.getMessage()); }
+        });
     }
 
-    // Biến lưu trữ file nhận được
+    /** Gửi file ở luồng nền (SwingWorker), không làm đơ EDT. */
+    public void sendFile(String target, boolean isGroup, File file) {
+        SwingWorker<Void, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                java.util.List<byte[]> chunks = com.securechat.client.network.FileChunkUtils.splitFileIntoChunks(
+                        file, com.securechat.client.network.FileChunkUtils.DEFAULT_CHUNK_SIZE);
+
+                String fileId = UUID.randomUUID().toString();
+                int total = chunks.size();
+
+                SwingUtilities.invokeLater(() ->
+                        chatPanel.appendMessage("[File]: Đang gửi file '" + file.getName() + "' (" + total + " chunk)..."));
+
+                for (int i = 0; i < total; i++) {
+                    Map<String, Object> pl = new HashMap<>();
+                    pl.put("fileId", fileId);
+                    pl.put("fileName", file.getName());
+                    pl.put("chunkIndex", i);
+                    pl.put("totalChunks", total);
+                    pl.put("data", Base64.getEncoder().encodeToString(chunks.get(i)));
+                    pl.put(isGroup ? "groupName" : "receiver", target);
+
+                    // sendRaw có khóa + chỉ ném exception (không đụng Swing) -> an toàn ở luồng nền.
+                    // Lỗi sẽ dừng vòng lặp và đi qua get() trong done().
+                    sendRaw(Packet.request("FILE_CHUNK", UUID.randomUUID().toString(), pl));
+                }
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                    chatPanel.appendMessage("[File]: Đã gửi xong file '" + file.getName() + "'.");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    chatPanel.appendMessage("[Lỗi gửi file]: Bị gián đoạn.");
+                } catch (java.util.concurrent.ExecutionException e) {
+                    Throwable c = e.getCause() != null ? e.getCause() : e;
+                    System.err.println("[Lỗi gửi file]: " + c);
+                    chatPanel.appendMessage("[Lỗi gửi file]: " + c.getMessage());
+                }
+            }
+        };
+        worker.execute();
+    }
+
     private byte[] lastCompleteFileBytes;
     private String lastCompleteFileName;
 
@@ -297,20 +373,63 @@ public class ClientController implements NetworkManager.MessageListener {
     }
 
     public void sendSticker(String target, boolean isGroup, String stickerCode) {
-        Map<String, Object> pl = new HashMap<>(); pl.put("messageId", UUID.randomUUID().toString()); pl.put(isGroup ? "groupName" : "receiver", target); pl.put("msgType", "STICKER"); pl.put("content", stickerCode);
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("messageId", UUID.randomUUID().toString());
+        pl.put(isGroup ? "groupName" : "receiver", target);
+        pl.put("msgType", "STICKER");
+        pl.put("content", stickerCode);
         chatPanel.appendMessage("[Bạn gửi Sticker]: " + stickerCode);
         sendQuietly(Packet.request("SEND_STICKER", UUID.randomUUID().toString(), pl));
     }
 
-    public void createGroup(String name) { sendQuietly(Packet.request(MessageType.CREATE_GROUP, UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.addGroupToList(name); }
-    public void joinGroup(String name) { sendQuietly(Packet.request("JOIN_GROUP", UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.addGroupToList(name); }
-    public void leaveGroup(String name) { sendQuietly(Packet.request("LEAVE_GROUP", UUID.randomUUID().toString(), Map.of("groupName", name))); chatPanel.removeGroupFromList(name); }
-    public void addGroupMember(String grp, String email) { sendQuietly(Packet.request(MessageType.ADD_GROUP_MEMBER, UUID.randomUUID().toString(), Map.of("groupName", grp, "memberEmail", email))); }
-    public void removeGroupMember(String grp, String email) { sendQuietly(Packet.request("REMOVE_GROUP_MEMBER", UUID.randomUUID().toString(), Map.of("groupName", grp, "memberEmail", email))); }
+    // ----- Nhóm: chỉ cập nhật UI khi Server trả OK -----
+
+    public void createGroup(String name) {
+        request(MessageType.CREATE_GROUP, new HashMap<>(Map.of("groupName", name)), res -> {
+            if (isOk(res)) loadMyGroups();          // lấy lại danh sách để có groupId thật
+            else showServerError(res);
+        });
+    }
+
+    public void joinGroup(String name) {
+        request("JOIN_GROUP", new HashMap<>(Map.of("groupName", name)), res -> {
+            if (isOk(res)) loadMyGroups();
+            else showServerError(res);
+        });
+    }
+
+    public void leaveGroup(String name) {
+        request("LEAVE_GROUP", new HashMap<>(Map.of("groupName", name)), res -> {
+            if (isOk(res)) {
+                groupIdByName.remove(name);
+                chatPanel.removeGroupFromList(name);
+            } else {
+                showServerError(res);
+            }
+        });
+    }
+
+    public void addGroupMember(String grp, String email) {
+        request(MessageType.ADD_GROUP_MEMBER,
+                new HashMap<>(Map.of("groupName", grp, "memberEmail", email)), res -> {
+                    if (isOk(res)) chatPanel.appendMessage("[Nhóm " + grp + "]: Đã thêm " + email + " vào nhóm.");
+                    else showServerError(res);
+                });
+    }
+
+    public void removeGroupMember(String grp, String email) {
+        request("REMOVE_GROUP_MEMBER",
+                new HashMap<>(Map.of("groupName", grp, "memberEmail", email)), res -> {
+                    if (isOk(res)) chatPanel.appendMessage("[Nhóm " + grp + "]: Đã xóa " + email + " khỏi nhóm.");
+                    else showServerError(res);
+                });
+    }
 
     public void blockTarget(String target, boolean isGroup) {
-        sendQuietly(Packet.request("BLOCK_USER", UUID.randomUUID().toString(), Map.of("target", target, "targetType", isGroup ? "GROUP" : "USER")));
+        sendQuietly(Packet.request("BLOCK_USER", UUID.randomUUID().toString(),
+                Map.of("target", target, "targetType", isGroup ? "GROUP" : "USER")));
     }
+
     public void addFriend(String friendEmail) {
         Map<String, Object> pl = new HashMap<>();
         pl.put("friendEmail", friendEmail);
@@ -319,39 +438,77 @@ public class ClientController implements NetworkManager.MessageListener {
     }
 
     public void markConversationSeen(String target, boolean isGroup) {
-        sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(), Map.of("target", target, "isGroup", isGroup, "status", "SEEN")));
+        sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(),
+                Map.of("target", target, "isGroup", isGroup, "status", "SEEN")));
     }
 
-    public void fetchDirectHistory(String targetUserId, Long beforeMessageId) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("userId", targetUserId);
-        if (beforeMessageId != null) {
-            payload.put("beforeMessageId", beforeMessageId);
-        }
+    // ------------------------------------------------------------------
+    // Lịch sử tin nhắn - Cursor Pagination (Lỗi 2)
+    // ------------------------------------------------------------------
 
-        request(MessageType.FETCH_DIRECT_HISTORY, payload, response -> {
-            if (isOk(response)) {
-                // TODO: Bóc tách danh sách tin nhắn từ response.getPayload()
+    /**
+     * Tải lịch sử chat riêng. before = null cho trang đầu; các trang sau truyền nextCursor.
+     * onPage được gọi trên EDT. Danh sách messages vẫn ở thứ tự DESC như Server trả.
+     */
+    public void loadMessageHistory(String target, boolean isGroupChat) {
+        if (isGroupChat) {
+            Long groupId = getGroupId(target);
+            if (groupId != null) {
+                fetchGroupHistory(groupId, null, this::showHistoryPage);
             } else {
-                showServerError(response);
+                chatPanel.appendMessage("[Lỗi]: Không thể tải lịch sử, chưa có thông tin nhóm " + target);
             }
-        });
+        } else {
+            Map<String, Object> pl = new HashMap<>();
+            pl.put("target", target);
+            fetchHistory(MessageType.FETCH_DIRECT_HISTORY, pl, null, this::showHistoryPage);
+        }
+    }
+    public void fetchDirectHistory(long peerUserId, Long before, Consumer<HistoryPage> onPage) {
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("userId", peerUserId);
+        fetchHistory(MessageType.FETCH_DIRECT_HISTORY, pl, before, onPage);
+    }
+
+    /** Tải lịch sử nhóm. Xem fetchDirectHistory. */
+    public void fetchGroupHistory(long groupId, Long before, Consumer<HistoryPage> onPage) {
+        Map<String, Object> pl = new HashMap<>();
+        pl.put("groupId", groupId);
+        fetchHistory(MessageType.FETCH_GROUP_HISTORY, pl, before, onPage);
+    }
+
+    /** Giữ chữ ký cũ cho code giao diện đang gọi; tạm hiển thị thẳng lên chatPanel. */
+    public void fetchDirectHistory(String targetUserId, Long beforeMessageId) {
+        fetchDirectHistory(asLong(targetUserId), beforeMessageId, this::showHistoryPage);
     }
 
     public void fetchGroupHistory(String groupId, Long beforeMessageId) {
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("groupId", groupId);
-        if (beforeMessageId != null) {
-            payload.put("beforeMessageId", beforeMessageId);
-        }
+        fetchGroupHistory(asLong(groupId), beforeMessageId, this::showHistoryPage);
+    }
 
-        request(MessageType.FETCH_GROUP_HISTORY, payload, response -> {
-            if (isOk(response)) {
-                // TODO: Xử lý hiển thị tin nhắn nhóm
-            } else {
-                showServerError(response);
-            }
+    @SuppressWarnings("unchecked")
+    private void fetchHistory(String type, Map<String, Object> pl, Long before, Consumer<HistoryPage> onPage) {
+        if (before != null) pl.put("beforeMessageId", before);
+        request(type, pl, res -> {
+            if (!isOk(res)) { showServerError(res); return; }
+            Map<String, Object> p = res.getPayload() == null ? Map.of() : res.getPayload();
+            List<Map<String, Object>> msgs = p.get("messages") instanceof List<?> l
+                    ? (List<Map<String, Object>>) l : List.of();
+            boolean hasMore = Boolean.TRUE.equals(p.get("hasMore"));
+            Long next = p.get("nextCursor") == null ? null : asLong(p.get("nextCursor"));
+            onPage.accept(new HistoryPage(msgs, hasMore, next));
         });
+    }
+
+    /** Hiển thị mặc định: đảo DESC -> ASC rồi in từng tin. ChatPanel nên tự prepend + giữ JScrollBar. */
+    private void showHistoryPage(HistoryPage page) {
+        List<Map<String, Object>> asc = new ArrayList<>(page.messages());
+        Collections.reverse(asc);
+        for (Map<String, Object> m : asc) {
+            String sender = str(m, "senderName", "senderEmail", "sender", "senderId");
+            String time = fmtTime(m.get("sentAt"));
+            chatPanel.appendMessage("[" + time + "] " + sender + ": " + str(m, "content"));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -463,6 +620,20 @@ public class ClientController implements NetworkManager.MessageListener {
         t.start();
     }
 
+    /**
+     * Gửi thô: có khóa để số thứ tự (sequence) mã hóa luôn khớp thứ tự gửi lên socket.
+     * Chỉ ném exception, không đụng tới Swing -> gọi được từ mọi luồng.
+     */
+    private void sendRaw(Packet inner) throws Exception {
+        if (transport == null || state != ConnectionState.SECURE_READY) {
+            throw new IOException("Chưa có kênh bảo mật tới Server.");
+        }
+        synchronized (sendLock) {
+            network.sendMessage(transport.encodeOutbound(inner));
+        }
+    }
+
+    /** Dùng cho request-response trên EDT: lỗi sẽ hiện hộp thoại / ngắt kết nối. */
     private boolean sendEncrypted(Packet inner) {
         if (state != ConnectionState.SECURE_READY) { showError("Chưa có kênh bảo mật tới Server."); return false; }
         try {
@@ -473,7 +644,7 @@ public class ClientController implements NetworkManager.MessageListener {
                 showError("Gói tin vượt quá giới hạn 1MB của giao thức.");
                 return false;
             }
-            network.sendMessage(transport.encodeOutbound(inner));
+            sendRaw(inner);
             return true;
         } catch (Exception e) {
             fail("Lỗi gửi dữ liệu: " + e.getMessage());
@@ -481,23 +652,33 @@ public class ClientController implements NetworkManager.MessageListener {
         }
     }
 
+    /** Gửi không chờ phản hồi. Mọi lỗi đều được log ra console và báo lên chatPanel. */
     private void sendQuietly(Packet inner) {
         try {
-            if (transport == null || state != ConnectionState.SECURE_READY) {
-                throw new java.io.IOException("Socket chưa kết nối.");
-            }
-            network.sendMessage(transport.encodeOutbound(inner));
+            sendRaw(inner);
+        } catch (IOException | GeneralSecurityException | IllegalStateException e) {
+            reportSendError(e);
+        } catch (RuntimeException e) {
+            reportSendError(e);
         } catch (Exception e) {
-            System.err.println("[Lỗi gửi mạng]: " + e.getMessage());
-            e.printStackTrace();
-            SwingUtilities.invokeLater(() -> {
-                chatPanel.appendMessage("[Lỗi mạng]: Không thể gửi tin nhắn. " + e.getMessage());
-            });
+            reportSendError(e);
         }
+    }
+
+    private void reportSendError(Exception e) {
+        System.err.println("[Lỗi gửi mạng]: " + e);
+        e.printStackTrace();
+        String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+        SwingUtilities.invokeLater(() -> chatPanel.appendMessage("[Lỗi gửi mạng]: " + msg));
     }
 
     @Override
     public void onMessageReceived(String messageJson) {
+        // Luôn xử lý trên EDT: thứ tự gói được giữ nguyên và thao tác Swing/pending an toàn.
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> onMessageReceived(messageJson));
+            return;
+        }
         try {
             Packet packet = ProtocolSerializer.fromJson(messageJson);
             if (MessageType.SECURE_MESSAGE.equals(packet.getType())) {
@@ -520,7 +701,9 @@ public class ClientController implements NetworkManager.MessageListener {
             if (!"SERVER_CONFIRMED".equals(inner.getPayload().get("confirm"))) return;
             Packet confirm = Packet.ok(MessageType.HANDSHAKE_CONFIRM, UUID.randomUUID().toString(),
                     Map.of("confirm", "CLIENT_CONFIRMED"));
-            network.sendMessage(transport.encodeOutbound(confirm));
+            synchronized (sendLock) {
+                network.sendMessage(transport.encodeOutbound(confirm));
+            }
 
             if (handshakeTimer != null) handshakeTimer.stop();
             state = ConnectionState.SECURE_READY;
@@ -533,49 +716,65 @@ public class ClientController implements NetworkManager.MessageListener {
             return;
         }
 
-        // Ghép phản hồi theo requestId
-        Pending x = pending.remove(inner.getRequestId());
+        String type = inner.getType() != null ? inner.getType() : "";
+
+        // 1) GÓI PUSH do Server chủ động gửi: xử lý TRƯỚC và KHÔNG ghép với request đang chờ.
+        switch (type) {
+            case MessageType.PUSH_DIRECT_MESSAGE -> { handlePushDirect(inner); return; }
+            case MessageType.PUSH_GROUP_MESSAGE -> { handlePushGroup(inner); return; }
+            case "MESSAGE_STATUS" -> {
+                Map<String, Object> pl = inner.getPayload();
+                if (pl != null) chatPanel.appendMessage("[Trạng thái tin nhắn]: " + pl.get("status"));
+                return;
+            }
+            case "FRIEND_STATUS" -> {
+                Map<String, Object> pl = inner.getPayload();
+                if (pl != null) chatPanel.addOrUpdateFriend((String) pl.get("email"), (String) pl.get("status"));
+                return;
+            }
+            case "SYSTEM_BROADCAST" -> {
+                Map<String, Object> pl = inner.getPayload();
+                if (pl != null) chatPanel.appendMessage("📢 [HỆ THỐNG]: " + pl.get("message"));
+                return;
+            }
+            default -> { /* không phải PUSH: là phản hồi request-response */ }
+        }
+
+        // 2) Phản hồi OK/ERROR: ghép theo requestId
+        Pending x = inner.getRequestId() == null ? null : pending.remove(inner.getRequestId());
         if (x != null) {
             x.timer.stop();
             setBusy(false);
             x.callback.accept(inner);
-        } else if (MessageType.ERROR.equals(inner.getType())) {
+        } else if (MessageType.ERROR.equals(type) || "ERROR".equals(inner.getStatus())) {
             if (loggedIn) chatPanel.appendMessage("[Server báo lỗi]: " + errorText(inner.getError()));
             else showServerError(inner);
         }
+    }
 
-        // ==========================================================
-        // GÓI ĐẨY TỪ SERVER (Broadcast online/offline, tin nhắn đến)
-        // ==========================================================
+    private void handlePushDirect(Packet inner) {
         Map<String, Object> pl = inner.getPayload();
         if (pl == null) return;
+        String sender = str(pl, "senderName", "senderEmail", "sender", "senderId");
+        String time = fmtTime(pl.get("sentAt"));
+        chatPanel.appendMessage("[" + time + "] [Từ " + sender + "]: " + str(pl, "content"));
+    }
 
-        String type = inner.getType() != null ? inner.getType() : "";
-        switch (type) {
-            case MessageType.PUSH_DIRECT_MESSAGE, MessageType.PUSH_GROUP_MESSAGE -> {
-                String sender = (String) pl.getOrDefault("sender", "Ai đó");
-                String content = (String) pl.getOrDefault("content", "");
-
-                if (MessageType.PUSH_GROUP_MESSAGE.equals(type)) {
-                    String group = (String) pl.get("groupName");
-                    chatPanel.appendMessage("[Nhóm " + group + "] " + sender + ": " + content);
-                } else {
-                    chatPanel.appendMessage("[Từ " + sender + "]: " + content);
-                }
-
-                if (pl.get("messageId") != null) {
-                    sendQuietly(Packet.request("MESSAGE_STATUS", UUID.randomUUID().toString(),
-                            Map.of("messageId", pl.get("messageId"), "status", "DELIVERED")));
-                }
-            }
-            case "MESSAGE_STATUS" -> chatPanel.appendMessage("[Trạng thái tin nhắn]: " + pl.get("status"));
-            case "FRIEND_STATUS" -> chatPanel.addOrUpdateFriend((String) pl.get("email"), (String) pl.get("status"));
-            case "SYSTEM_BROADCAST" -> chatPanel.appendMessage("📢 [HỆ THỐNG]: " + pl.get("message"));
-        }
+    private void handlePushGroup(Packet inner) {
+        Map<String, Object> pl = inner.getPayload();
+        if (pl == null) return;
+        String sender = str(pl, "senderName", "senderEmail", "sender", "senderId");
+        String group = str(pl, "groupName", "groupId");
+        String time = fmtTime(pl.get("sentAt"));
+        chatPanel.appendMessage("[" + time + "] [Nhóm " + group + "] " + sender + ": " + str(pl, "content"));
     }
 
     @Override
     public void onConnectionLost() {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(this::onConnectionLost);
+            return;
+        }
         if (state == ConnectionState.DISCONNECTED) return;
         fail("Mất kết nối với Server. Vui lòng đăng nhập lại để kết nối lại.");
     }
@@ -600,6 +799,7 @@ public class ClientController implements NetworkManager.MessageListener {
         session = null; transport = null;
         state = ConnectionState.DISCONNECTED;
         loggedIn = false;
+        groupIdByName.clear();
         setBusy(false);
     }
 
@@ -619,5 +819,29 @@ public class ClientController implements NetworkManager.MessageListener {
 
     private void showInfo(String msg) {
         JOptionPane.showMessageDialog(mainFrame, msg, "Thông báo", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    /** Lấy giá trị chuỗi đầu tiên khác null trong các key; rỗng nếu không có. */
+    private static String str(Map<String, Object> m, String... keys) {
+        for (String k : keys) {
+            Object v = m.get(k);
+            if (v != null) return String.valueOf(v);
+        }
+        return "";
+    }
+
+    /** sentAt dạng ISO-8601 không có múi giờ (yyyy-MM-ddTHH:mm:ss) -> LocalDateTime -> chuỗi hiển thị. */
+    private static String fmtTime(Object v) {
+        if (v == null) return "";
+        try {
+            return LocalDateTime.parse(String.valueOf(v)).format(TIME_FMT);
+        } catch (DateTimeParseException e) {
+            return String.valueOf(v);
+        }
+    }
+
+    public static long asLong(Object v) {
+        if (v == null) return 0L;
+        return v instanceof Number n ? n.longValue() : Long.parseLong(String.valueOf(v));
     }
 }

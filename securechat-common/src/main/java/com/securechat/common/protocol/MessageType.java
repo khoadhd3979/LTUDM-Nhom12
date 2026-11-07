@@ -31,4 +31,5 @@ public final class MessageType {
     public static final String FETCH_GROUP_HISTORY = "FETCH_GROUP_HISTORY";
     public static final String PUSH_DIRECT_MESSAGE = "PUSH_DIRECT_MESSAGE";
     public static final String PUSH_GROUP_MESSAGE = "PUSH_GROUP_MESSAGE";
+
 }
