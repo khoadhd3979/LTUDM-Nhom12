@@ -13,14 +13,13 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-
 public class ServerMain {
 
-    private static final int CORE_POOL_SIZE     = 10;
-    private static final int MAX_POOL_SIZE      = 50;
-    private static final int QUEUE_CAPACITY     = 100;
-    private static final long KEEP_ALIVE_SECONDS = 60L;
-    private static final long SHUTDOWN_WAIT_SECONDS = 10L;
+    private static final int CORE_POOL_SIZE          = 10;
+    private static final int MAX_POOL_SIZE           = 50;
+    private static final int QUEUE_CAPACITY          = 100;
+    private static final long KEEP_ALIVE_SECONDS     = 60L;
+    private static final long SHUTDOWN_WAIT_SECONDS  = 10L;
 
     public static void main(String[] args) throws IOException {
         int port = AppConfig.port();
@@ -34,16 +33,16 @@ public class ServerMain {
             while (!server.isClosed()) {
                 try {
                     Socket client = server.accept();
+                    ClientHandler handler = new ClientHandler(client);
                     try {
-                        pool.submit(new ClientHandler(client));
+                        pool.submit(handler);
                     } catch (RejectedExecutionException ree) {
-                        // Hàng đợi đầy: từ chối client mới, KHÔNG chặn accept loop
                         System.err.println("[WARN] Server overload — từ chối "
                                 + client.getRemoteSocketAddress());
                         closeQuietly(client);
                     }
                 } catch (SocketException se) {
-                    break; // server đã đóng — thoát vòng lặp accept
+                    break;
                 } catch (IOException ioe) {
                     System.err.println("[WARN] accept lỗi, tiếp tục: " + ioe.getMessage());
                 }
@@ -65,21 +64,40 @@ public class ServerMain {
                     t.setDaemon(false);
                     return t;
                 },
-                new ThreadPoolExecutor.AbortPolicy()  // ném RejectedExecutionException — được catch ở trên
+                new ThreadPoolExecutor.AbortPolicy()
         );
     }
 
     private static void shutdown(ServerSocket server, ThreadPoolExecutor pool) {
+        System.out.println("[SHUTDOWN] Bắt đầu shutdown server...");
         try { server.close(); } catch (IOException ignored) {}
+
+        ClientConnectionManager.closeAll();
         pool.shutdown();
-        try {
-            if (!pool.awaitTermination(SHUTDOWN_WAIT_SECONDS, TimeUnit.SECONDS)) {
-                pool.shutdownNow();
+
+        long deadline = System.currentTimeMillis() + (SHUTDOWN_WAIT_SECONDS * 1000L);
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                if (pool.awaitTermination(500, TimeUnit.MILLISECONDS)) {
+                    System.out.println("[SHUTDOWN] ThreadPool terminated cleanly.");
+                    System.out.println("[SHUTDOWN] ALL_CONNECTIONS="
+                            + ClientConnectionManager.connectionCount()
+                            + " ONLINE=" + ClientConnectionManager.onlineCount());
+                    System.out.println("Server shutdown hoàn tất.");
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
             }
-        } catch (InterruptedException e) {
-            pool.shutdownNow();
-            Thread.currentThread().interrupt();
+            ClientConnectionManager.closeAll();
         }
+
+        System.err.println("[SHUTDOWN] Timeout — force shutdownNow()");
+        pool.shutdownNow();
+        System.out.println("[SHUTDOWN] ALL_CONNECTIONS="
+                + ClientConnectionManager.connectionCount()
+                + " ONLINE=" + ClientConnectionManager.onlineCount());
         System.out.println("Server shutdown hoàn tất.");
     }
 
