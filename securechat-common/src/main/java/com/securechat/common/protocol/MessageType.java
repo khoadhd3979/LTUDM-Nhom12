@@ -21,15 +21,16 @@ public final class MessageType {
     public static final String HANDSHAKE_CONFIRM = "HANDSHAKE_CONFIRM";
     public static final String SECURE_MESSAGE    = "SECURE_MESSAGE";
 
-    // BỔ SUNG CÁC HẰNG SỐ PHASE 4 :
-    public static final String FETCH_MY_GROUPS = "FETCH_MY_GROUPS";
-    public static final String SEND_GROUP_MESSAGE = "SEND_GROUP_MESSAGE";
-    public static final String SEND_DIRECT_MESSAGE = "SEND_DIRECT_MESSAGE";
-    public static final String CREATE_GROUP = "CREATE_GROUP";
-    public static final String ADD_GROUP_MEMBER = "ADD_GROUP_MEMBER";
+    // Phase 4 — Chat & Groups (client → server)
+    public static final String SEND_DIRECT_MESSAGE  = "SEND_DIRECT_MESSAGE";
+    public static final String SEND_GROUP_MESSAGE   = "SEND_GROUP_MESSAGE";
     public static final String FETCH_DIRECT_HISTORY = "FETCH_DIRECT_HISTORY";
-    public static final String FETCH_GROUP_HISTORY = "FETCH_GROUP_HISTORY";
-    public static final String PUSH_DIRECT_MESSAGE = "PUSH_DIRECT_MESSAGE";
-    public static final String PUSH_GROUP_MESSAGE = "PUSH_GROUP_MESSAGE";
+    public static final String FETCH_GROUP_HISTORY  = "FETCH_GROUP_HISTORY";
+    public static final String CREATE_GROUP         = "CREATE_GROUP";
+    public static final String ADD_GROUP_MEMBER     = "ADD_GROUP_MEMBER";
+    public static final String FETCH_MY_GROUPS      = "FETCH_MY_GROUPS";
 
+    // Phase 4 — Push (server → client, inside SECURE_MESSAGE)
+    public static final String PUSH_DIRECT_MESSAGE = "PUSH_DIRECT_MESSAGE";
+    public static final String PUSH_GROUP_MESSAGE  = "PUSH_GROUP_MESSAGE";
 }

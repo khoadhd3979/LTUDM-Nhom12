@@ -117,4 +117,15 @@ public class UserDAO {
         u.setUpdatedAt(rs.getObject("updated_at", LocalDateTime.class));
         return u;
     }
+
+    public boolean existsById(long userId) throws SQLException {
+    String sql = "SELECT 1 FROM dbo.users WHERE id = ?";
+    try (Connection c = DBConnection.open();
+         PreparedStatement ps = c.prepareStatement(sql)) {
+        ps.setLong(1, userId);
+        try (ResultSet rs = ps.executeQuery()) {
+            return rs.next();
+        }
+    }
+}
 }
