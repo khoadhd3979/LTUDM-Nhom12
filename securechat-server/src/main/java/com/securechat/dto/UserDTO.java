@@ -8,11 +8,12 @@ public class UserDTO {
     private String email;
     private String passwordHash;
     private String fullName;
-    private String gender;         // MALE / FEMALE / OTHER
+    private String gender;
     private LocalDate dateOfBirth;
-    private String status;         // PENDING / ACTIVE / LOCKED
+    private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime lastSeenAt;   // [M2-B] MỚI
 
     public long getId() { return id; }
     public void setId(long id) { this.id = id; }
@@ -32,4 +33,6 @@ public class UserDTO {
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+    public LocalDateTime getLastSeenAt() { return lastSeenAt; }
+    public void setLastSeenAt(LocalDateTime lastSeenAt) { this.lastSeenAt = lastSeenAt; }
 }

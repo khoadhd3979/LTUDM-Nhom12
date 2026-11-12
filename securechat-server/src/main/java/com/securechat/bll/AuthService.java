@@ -46,7 +46,7 @@ public class AuthService {
 
         String passwordHash = PasswordHasher.hash(password);
         String otpPlain = SecurityUtils.generateOtp();
-        String otpHash = PasswordHasher.hash(otpPlain);
+        String otpHash = PasswordHasher.hashOtp(otpPlain);   // [M2-B] password API → OTP API
         LocalDateTime expiresAt = LocalDateTime.now(ZoneOffset.UTC).plusMinutes(OTP_TTL_MINUTES);
 
         UserDTO user = new UserDTO();
@@ -81,7 +81,6 @@ public class AuthService {
         try {
             MailUtils.sendOtp(email, otpPlain);
         } catch (RuntimeException mailEx) {
-            // Compensate: remove user + otps so a retry is possible.
             try {
                 otpDAO.deleteByUser(userId);
                 userDAO.deleteById(userId);
@@ -93,7 +92,7 @@ public class AuthService {
                     "Không gửi được email OTP, vui lòng thử lại");
         }
 
-        user.setPasswordHash(null); // do not leak
+        user.setPasswordHash(null);
         return user;
     }
 
@@ -115,7 +114,7 @@ public class AuthService {
 
         Optional<OtpRecord> opt = otpDAO.findLatest(user.getId(), "REGISTER");
         OtpRecord otp = opt.orElseThrow(() ->
-        new BusinessException("OTP_NOT_FOUND", "Không có OTP còn hiệu lực"));
+                new BusinessException("OTP_NOT_FOUND", "Không có OTP còn hiệu lực"));
 
         if (otp.consumedAt() != null)
             throw new BusinessException("OTP_ALREADY_USED", "OTP đã được sử dụng");
@@ -126,14 +125,13 @@ public class AuthService {
         if (otp.attemptCount() >= OTP_MAX_ATTEMPTS)
             throw new BusinessException("OTP_ATTEMPTS_EXCEEDED", "Vượt quá số lần thử OTP");
 
-        if (!PasswordHasher.verify(otpPlain, otp.otpHash())) {
+        if (!PasswordHasher.verifyOtp(otpPlain, otp.otpHash())) {  // [M2-B] password API → OTP API
             int newCount = otpDAO.incrementAttemptIfBelowLimit(otp.id(), OTP_MAX_ATTEMPTS);
             if (newCount < 0)
                 throw new BusinessException("OTP_ATTEMPTS_EXCEEDED", "Vượt quá số lần thử OTP");
             throw new BusinessException("OTP_INVALID", "OTP không đúng");
         }
 
-        // Success — atomically mark consumed + activate user.
         try (Connection c = DBConnection.open()) {
             c.setAutoCommit(false);
             try {
@@ -158,7 +156,7 @@ public class AuthService {
     }
 
     // ============================================================
-    // LOGIN
+    // LOGIN (không đổi — dùng password API PBKDF2 600K)
     // ============================================================
     public UserDTO login(String rawEmail, String password) throws SQLException {
 
@@ -168,7 +166,6 @@ public class AuthService {
 
         Optional<UserDTO> opt = userDAO.getUserByEmail(email);
         if (opt.isEmpty()) {
-            // Timing side-channel mitigation: always run BCrypt verify
             PasswordHasher.verify(password, DUMMY_HASH);
             throw new BusinessException("AUTH_FAILED", "Email hoặc mật khẩu không đúng");
         }
@@ -185,18 +182,15 @@ public class AuthService {
         if (!"ACTIVE".equals(status))
             throw new BusinessException("AUTH_FAILED", "Email hoặc mật khẩu không đúng");
 
-        user.setPasswordHash(null);   // never leave handler with hash
+        user.setPasswordHash(null);
         return user;
     }
 
-    // ============================================================
-    // HELPERS
-    // ============================================================
     private static boolean isUniqueViolation(SQLException e) {
         SQLException cur = e;
         while (cur != null) {
             int code = cur.getErrorCode();
-            if (code == 2601 || code == 2627) return true; // SQL Server: unique index / PK
+            if (code == 2601 || code == 2627) return true;
             cur = cur.getNextException();
         }
         return false;

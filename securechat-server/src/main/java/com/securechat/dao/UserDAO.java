@@ -8,7 +8,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -28,7 +27,6 @@ public class UserDAO {
             if (u.getDateOfBirth() != null) ps.setDate(5, Date.valueOf(u.getDateOfBirth()));
             else ps.setNull(5, Types.DATE);
             ps.setString(6, u.getStatus() == null ? "PENDING" : u.getStatus());
-
             if (ps.executeUpdate() != 1) throw new SQLException("Insert user thất bại.");
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) { long id = rs.getLong(1); u.setId(id); return id; }
@@ -37,7 +35,6 @@ public class UserDAO {
         }
     }
 
-        /** Overload dùng Connection của caller — KHÔNG tự đóng Connection (transaction do caller quản lý). */
     public long insert(Connection c, UserDTO u) throws SQLException {
         String sql = "INSERT INTO dbo.users (email, password_hash, full_name, gender, date_of_birth, status) " +
                      "VALUES (?, ?, ?, ?, ?, ?)";
@@ -50,7 +47,6 @@ public class UserDAO {
             if (u.getDateOfBirth() != null) ps.setDate(5, Date.valueOf(u.getDateOfBirth()));
             else ps.setNull(5, Types.DATE);
             ps.setString(6, u.getStatus() == null ? "PENDING" : u.getStatus());
-
             if (ps.executeUpdate() != 1) throw new SQLException("Insert user thất bại.");
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) { long id = rs.getLong(1); u.setId(id); return id; }
@@ -61,7 +57,7 @@ public class UserDAO {
 
     public Optional<UserDTO> getUserByEmail(String email) throws SQLException {
         String sql = "SELECT id, email, password_hash, full_name, gender, date_of_birth, status, " +
-                     "created_at, updated_at FROM dbo.users WHERE email = ?";
+                     "created_at, updated_at, last_seen_at FROM dbo.users WHERE email = ?";
         try (Connection c = DBConnection.open();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, email);
@@ -86,6 +82,16 @@ public class UserDAO {
         try (PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, status);
             ps.setLong(2, userId);
+            return ps.executeUpdate() == 1;
+        }
+    }
+
+    /** [M2-B] Capability method — KHÔNG gọi từ AuthService/ClientHandler trong M2-B. */
+    public boolean updateLastSeen(long userId) throws SQLException {
+        String sql = "UPDATE dbo.users SET last_seen_at = SYSUTCDATETIME() WHERE id = ?";
+        try (Connection c = DBConnection.open();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, userId);
             return ps.executeUpdate() == 1;
         }
     }
@@ -115,24 +121,27 @@ public class UserDAO {
         u.setStatus(rs.getString("status"));
         u.setCreatedAt(rs.getObject("created_at", LocalDateTime.class));
         u.setUpdatedAt(rs.getObject("updated_at", LocalDateTime.class));
+        u.setLastSeenAt(rs.getObject("last_seen_at", LocalDateTime.class));
         return u;
     }
 
     public boolean existsById(long userId) throws SQLException {
         String sql = "SELECT 1 FROM dbo.users WHERE id = ?";
         try (Connection c = DBConnection.open();
-            PreparedStatement ps = c.prepareStatement(sql)) {
+             PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, userId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
         }
     }
+
+    /** N-4: chỉ SELECT 3 cột — không thêm last_seen_at. */
     public Optional<UserDTO> findActiveByEmail(String email) throws SQLException {
         String sql = "SELECT id, email, full_name FROM dbo.users " +
-                    "WHERE email = ? AND status = 'ACTIVE'";
+                     "WHERE email = ? AND status = 'ACTIVE'";
         try (Connection c = DBConnection.open();
-            PreparedStatement ps = c.prepareStatement(sql)) {
+             PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, email);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) return Optional.empty();
@@ -140,10 +149,9 @@ public class UserDAO {
                 u.setId(rs.getLong("id"));
                 u.setEmail(rs.getString("email"));
                 u.setFullName(rs.getString("full_name"));
-                u.setStatus("ACTIVE");   // ngầm định
+                u.setStatus("ACTIVE");
                 return Optional.of(u);
             }
         }
     }
-
 }

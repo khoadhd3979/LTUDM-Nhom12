@@ -33,12 +33,6 @@
             <artifactId>mssql-jdbc</artifactId>
         </dependency>
 
-        <!-- Password hash (Phase 2) -->
-        <dependency>
-            <groupId>org.mindrot</groupId>
-            <artifactId>jbcrypt</artifactId>
-        </dependency>
-
         <!-- JavaMail gửi OTP qua Gmail SMTP (Phase 2) -->
         <dependency>
             <groupId>com.sun.mail</groupId>
