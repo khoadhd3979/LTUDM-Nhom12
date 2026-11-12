@@ -2,6 +2,8 @@ package com.securechat.server;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -72,10 +74,14 @@ public final class ClientConnectionManager {
     }
 
     /**
-     * Gỡ user session — gọi khi LOGOUT. Chỉ xóa nếu handler là session hiện tại.
+     * Gỡ user session — gọi khi LOGOUT hoặc disconnect.
+     * Chỉ xóa nếu handler là session hiện tại (atomic remove(key, value)).
+     *
+     * [M3-B F-5] Trả về true CHỈ KHI handler là session hiện tại và vừa được gỡ.
+     * Dùng để đảm bảo last_seen_at chỉ được update đúng một lần mỗi lần offline.
      */
-    public static void unregister(long userId, ClientHandler handler) {
-        ONLINE.remove(userId, handler);
+    public static boolean unregister(long userId, ClientHandler handler) {
+        return ONLINE.remove(userId, handler);
     }
 
     /** Tra cứu handler đang online của user (nếu có) — dùng để push message. */
@@ -103,5 +109,14 @@ public final class ClientConnectionManager {
                 // socket có thể đã đóng — không quan trọng khi shutdown
             }
         }
+    }
+
+    /**
+     * [M3-B P-8] Snapshot danh sách handler đang ONLINE.
+     * Trả về bản copy để caller có thể lặp và fanout mà không giữ lock của map.
+     * Không đảm bảo thứ tự; caller không được mutate map gốc qua list này.
+     */
+    public static List<ClientHandler> snapshotOnlineHandlers() {
+        return new ArrayList<>(ONLINE.values());
     }
 }

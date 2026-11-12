@@ -1,17 +1,20 @@
 package com.securechat.server;
 
+import com.securechat.bll.AdminService;
 import com.securechat.bll.AuthService;
 import com.securechat.bll.ChatService;
 import com.securechat.bll.GroupService;
+import com.securechat.bll.UserBLL;
+import com.securechat.validation.InputValidator;
 import com.securechat.common.protocol.MessageType;
 import com.securechat.common.protocol.Packet;
 import com.securechat.common.protocol.ProtocolSerializer;
+import com.securechat.dao.UserDAO;
 import com.securechat.dto.GroupDTO;
 import com.securechat.dto.MessageDTO;
 import com.securechat.dto.UserDTO;
 import com.securechat.exception.BusinessException;
 import com.securechat.security.*;
-import com.securechat.validation.InputValidator;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -38,6 +41,8 @@ public class ClientHandler implements Runnable {
     private final GroupService groupService = new GroupService();
     private final SecureSession session   = new SecureSession();
     private final SecureTransport transport = new SecureTransport(session);
+    private final UserBLL userBLL = new UserBLL();
+    private final AdminService adminService = new AdminService();
 
     private final Object writeLock = new Object();
     private volatile long connId = -1L;
@@ -57,7 +62,7 @@ public class ClientHandler implements Runnable {
     }
 
     /**
-     * Public thread-safe — dùng cho Phase 4 push từ thread khác.
+     * Public thread-safe — dùng cho push từ thread khác.
      * @return true nếu encode + write thành công (không phát hiện lỗi ghi).
      */
     public boolean sendSecure(Packet inner) {
@@ -315,6 +320,16 @@ public class ClientHandler implements Runnable {
     // Application dispatch
     // ============================================================
 
+    private String remoteIp() {
+        try {
+            var addr = socket.getRemoteSocketAddress();
+            if (addr instanceof java.net.InetSocketAddress isa && isa.getAddress() != null) {
+                return isa.getAddress().getHostAddress();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private Packet dispatchInner(Packet req) {
         if (req == null || req.getType() == null)
             return Packet.error(req == null ? null : req.getRequestId(), "MISSING_TYPE");
@@ -347,9 +362,17 @@ public class ClientHandler implements Runnable {
                     this.currentUser = u;
                     return Packet.ok(MessageType.OK, reqId, userPayload(u));
                 }
+                // [M3-B P-6] capture → unregister → updateLastSeen (if true) → clear
                 case MessageType.LOGOUT: {
                     if (currentUser == null) return Packet.error(reqId, "NOT_LOGGED_IN");
-                    ClientConnectionManager.unregister(currentUser.getId(), this);
+                    long uid = currentUser.getId();
+                    boolean removed = ClientConnectionManager.unregister(uid, this);
+                    if (removed) {
+                        try { new UserDAO().updateLastSeen(uid); }
+                        catch (SQLException e) {
+                            System.err.println("[WARN] updateLastSeen fail uid=" + uid + ": " + e.getMessage());
+                        }
+                    }
                     this.currentUser = null;
                     return Packet.ok(MessageType.OK, reqId, Collections.emptyMap());
                 }
@@ -361,7 +384,7 @@ public class ClientHandler implements Runnable {
                             ChatService.toSearchUserPayload(found));
                 }
 
-                // ---- Phase 4 — Chat ----
+                // ---- Chat ----
                 case MessageType.SEND_DIRECT_MESSAGE: {
                     long senderId = getCurrentUserId();
                     if (senderId <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -407,7 +430,7 @@ public class ClientHandler implements Runnable {
                             historyPayload(list, limit, false));
                 }
 
-                // ---- Phase 4 — Group ----
+                // ---- Group ----
                 case MessageType.CREATE_GROUP: {
                     long senderId = getCurrentUserId();
                     if (senderId <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -453,6 +476,149 @@ public class ClientHandler implements Runnable {
                     return Packet.ok(MessageType.OK, reqId, payload);
                 }
 
+                // ---- Profile ----
+                case MessageType.UPDATE_PROFILE: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    UserDTO updated = userBLL.updateProfile(uid, p, remoteIp());
+                    return Packet.ok(MessageType.OK, reqId, userPayload(updated));
+                }
+
+                // ---- Group management ----
+                case MessageType.REMOVE_GROUP_MEMBER: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    Long gid = getLongOrNull(p, "groupId");
+                    Long tid = getLongOrNull(p, "targetUserId");
+                    if (gid == null || tid == null || gid <= 0L || tid <= 0L)
+                        return Packet.error(reqId, "INVALID_MESSAGE");
+                    groupService.removeMember(uid, gid, tid, remoteIp());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("groupId", gid);
+                    out.put("removedUserId", tid);
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+                case MessageType.SET_GROUP_ROLE: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    Long gid = getLongOrNull(p, "groupId");
+                    Long tid = getLongOrNull(p, "targetUserId");
+                    String role = getStr(p, "newRole");
+                    if (gid == null || tid == null || gid <= 0L || tid <= 0L)
+                        return Packet.error(reqId, "INVALID_MESSAGE");
+                    groupService.setRole(uid, gid, tid, role, remoteIp());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("groupId", gid);
+                    out.put("targetUserId", tid);
+                    out.put("newRole", role == null ? null : role.toUpperCase(java.util.Locale.ROOT));
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+
+                // ---- Read status ----
+                // [M3-B P-3] MARK_READ direct — response không chứa readAt; status từ DTO refetch.
+                case MessageType.MARK_READ: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    String mType = InputValidator.validateMarkReadType(getStr(p, "messageType"));
+                    Long mid = getLongOrNull(p, "messageId");
+                    if (mid == null || mid <= 0L)
+                        return Packet.error(reqId, "INVALID_MESSAGE");
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    if ("DIRECT".equals(mType)) {
+                        MessageDTO m = chatService.markReadDirect(uid, mid);
+                        out.put("messageId", m.getMessageId());
+                        out.put("messageType", "DIRECT");
+                        if (m.getStatus() != null) out.put("status", m.getStatus());
+                        // Không trả readAt — tránh dùng sentAt thay thế.
+                    } else {
+                        chatService.markReadGroup(uid, mid);
+                        out.put("messageId", mid);
+                        out.put("messageType", "GROUP");
+                    }
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+                case MessageType.MESSAGE_STATUS: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    String status = getStr(p, "status");
+                    if (!"SEEN".equals(status))
+                        return Packet.error(reqId, "INVALID_MESSAGE");
+                    boolean isGroup = Boolean.TRUE.equals(p == null ? null : p.get("isGroup"));
+                    String target = getStr(p, "target");
+                    if (target == null || target.isBlank())
+                        return Packet.error(reqId, "INVALID_MESSAGE");
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    if (isGroup) {
+                        long gid = groupService.resolveGroupByName(uid, target);
+                        int n = chatService.markConversationSeenGroup(uid, gid);
+                        out.put("markedCount", n);
+                        out.put("groupId", gid);
+                    } else {
+                        UserDTO peer = chatService.searchUser(target);
+                        int n = chatService.markConversationSeenDirect(uid, peer.getId());
+                        out.put("markedCount", n);
+                        out.put("peerUserId", peer.getId());
+                    }
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+
+                // ---- System-admin commands ----
+                case MessageType.LOCK_USER: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    Long tid = getLongOrNull(p, "targetUserId");
+                    if (tid == null || tid <= 0L) return Packet.error(reqId, "INVALID_MESSAGE");
+                    String reason = getStr(p, "reason");
+                    try {
+                        adminService.lockUser(uid, tid, reason, remoteIp());
+                    } catch (BusinessException be) {
+                        // [M3-B P-2] CANNOT_LOCK_LAST_ADMIN_OF_GROUP mang details {groupIds}; chuyển thẳng.
+                        if ("CANNOT_LOCK_LAST_ADMIN_OF_GROUP".equals(be.getCode())
+                                && !be.getDetails().isEmpty()) {
+                            return Packet.error(reqId, be.getCode(), be.getDetails());
+                        }
+                        throw be;
+                    }
+                    // Best-effort ERROR + đóng socket target (vô điều kiện).
+                    ClientHandler target = ClientConnectionManager.findByUserId(tid);
+                    if (target != null) {
+                        try { target.sendSecure(Packet.error(null, "ACCOUNT_LOCKED")); }
+                        catch (Exception ignored) {}
+                        target.closeSocketQuietly();
+                    }
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("targetUserId", tid);
+                    out.put("status", "LOCKED");
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+                case MessageType.UNLOCK_USER: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    Long tid = getLongOrNull(p, "targetUserId");
+                    if (tid == null || tid <= 0L) return Packet.error(reqId, "INVALID_MESSAGE");
+                    adminService.unlockUser(uid, tid, remoteIp());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("targetUserId", tid);
+                    out.put("status", "ACTIVE");
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+                case MessageType.SYSTEM_BROADCAST: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    String msg = getStr(p, "message");
+                    AdminService.BroadcastResult r = adminService.broadcast(uid, msg, remoteIp());
+                    Map<String, Object> out = new LinkedHashMap<>();
+                    out.put("recipientCount", r.total);
+                    out.put("successCount", r.success);
+                    out.put("failedCount", r.failed);
+                    return Packet.ok(MessageType.OK, reqId, out);
+                }
+                case MessageType.USER_STATS: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    return Packet.ok(MessageType.OK, reqId, adminService.userStats(uid));
+                }
+
                 default:
                     return Packet.error(reqId, "UNKNOWN_TYPE");
             }
@@ -468,11 +634,6 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Chuẩn hóa limit MỘT LẦN theo cùng quy tắc của ChatService
-     * để hasMore / nextCursor / page size luôn khớp với số message
-     * thực tế mà DAO đã trả về (safeLimit + 1).
-     */
     private Map<String, Object> historyPayload(List<MessageDTO> raw, int requestedLimit,
                                                boolean includeStatus) {
         int safeLimit = InputValidator.normalizeHistoryLimit(requestedLimit);
@@ -527,16 +688,27 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    private void closeSocketQuietly() {
+    void closeSocketQuietly() {
         try { socket.close(); } catch (IOException ignored) {}
     }
 
+    /**
+     * [M3-B P-6] Capture userId → unregister → updateLastSeen (nếu true) → clear currentUser.
+     * Exactly-once last_seen trên cả LOGOUT và disconnect (LOGOUT clear currentUser trước
+     * nên releaseSession tự no-op khi đã LOGOUT).
+     */
     private void releaseSession() {
         UserDTO u = this.currentUser;
-        if (u != null) {
-            ClientConnectionManager.unregister(u.getId(), this);
-            this.currentUser = null;
+        if (u == null) return;
+        long uid = u.getId();
+        boolean removed = ClientConnectionManager.unregister(uid, this);
+        if (removed) {
+            try { new UserDAO().updateLastSeen(uid); }
+            catch (SQLException e) {
+                System.err.println("[WARN] updateLastSeen fail uid=" + uid + ": " + e.getMessage());
+            }
         }
+        this.currentUser = null;
     }
 
     private static Map<String, Object> tsPayload() {
