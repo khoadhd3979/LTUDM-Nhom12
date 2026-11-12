@@ -5,6 +5,7 @@ import com.securechat.dao.GroupDAO;
 import com.securechat.dao.MessageDAO;
 import com.securechat.dao.UserDAO;
 import com.securechat.dto.MessageDTO;
+import com.securechat.dto.UserDTO;
 import com.securechat.exception.BusinessException;
 import com.securechat.server.ClientConnectionManager;
 import com.securechat.server.ClientHandler;
@@ -25,18 +26,29 @@ public class ChatService {
     private final UserDAO userDAO = new UserDAO();
 
     // ============================================================
-    // Direct message
+    // [M1] SEARCH_USER
     // ============================================================
-    public MessageDTO sendDirect(long senderId, long receiverId, String content)
-            throws SQLException {
+    public UserDTO searchUser(String rawEmail) throws SQLException {
+        String email = InputValidator.validateEmail(rawEmail);
+        return userDAO.findActiveByEmail(email)
+                .orElseThrow(() -> new BusinessException(
+                        "USER_NOT_FOUND", "Không tìm thấy người dùng khả dụng"));
+    }
+
+    // ============================================================
+    // Send direct
+    // ============================================================
+    public MessageDTO sendDirect(long senderId, long receiverId,
+                                 String content, String rawMsgType) throws SQLException {
         if (senderId <= 0) throw new BusinessException("UNAUTHENTICATED", "Chưa đăng nhập");
         if (receiverId == senderId)
             throw new BusinessException("RECEIVER_SELF", "Không thể gửi tin nhắn cho chính mình");
         String trimmed = InputValidator.validateMessageContent(content);
+        String msgType = InputValidator.validateMsgType(rawMsgType);
         if (!userDAO.existsById(receiverId))
             throw new BusinessException("RECEIVER_NOT_FOUND", "Người nhận không tồn tại");
 
-        long messageId = messageDAO.insertDirect(senderId, receiverId, trimmed, "TEXT", null);
+        long messageId = messageDAO.insertDirect(senderId, receiverId, trimmed, msgType, null);
         MessageDTO msg = messageDAO.findDirectById(messageId)
                 .orElseThrow(() -> new SQLException("Inserted direct message not found: " + messageId));
 
@@ -54,18 +66,19 @@ public class ChatService {
     }
 
     // ============================================================
-    // Group message
+    // Send group
     // ============================================================
-    public MessageDTO sendGroup(long senderId, long groupId, String content)
-            throws SQLException {
+    public MessageDTO sendGroup(long senderId, long groupId,
+                                String content, String rawMsgType) throws SQLException {
         if (senderId <= 0) throw new BusinessException("UNAUTHENTICATED", "Chưa đăng nhập");
         String trimmed = InputValidator.validateMessageContent(content);
+        String msgType = InputValidator.validateMsgType(rawMsgType);
         if (!groupDAO.exists(groupId))
             throw new BusinessException("GROUP_NOT_FOUND", "Nhóm không tồn tại");
         if (!groupDAO.isMember(groupId, senderId))
             throw new BusinessException("NOT_GROUP_MEMBER", "Bạn không phải thành viên nhóm");
 
-        long messageId = messageDAO.insertGroup(senderId, groupId, trimmed, "TEXT", null);
+        long messageId = messageDAO.insertGroup(senderId, groupId, trimmed, msgType, null);
         MessageDTO msg = messageDAO.findGroupById(messageId)
                 .orElseThrow(() -> new SQLException("Inserted group message not found: " + messageId));
 
@@ -105,7 +118,7 @@ public class ChatService {
     }
 
     // ============================================================
-    // Serialization helper
+    // Serialization helpers
     // ============================================================
     public static Map<String, Object> toPayloadMap(MessageDTO m, boolean includeStatus) {
         Map<String, Object> p = new LinkedHashMap<>();
@@ -117,6 +130,15 @@ public class ChatService {
         p.put("messageType", m.getMessageType());
         if (m.getSentAt() != null) p.put("sentAt", m.getSentAt().toString());
         if (includeStatus && m.getStatus() != null) p.put("status", m.getStatus());
+        return p;
+    }
+
+    /** [M1] Payload SEARCH_USER — allowlist tối thiểu. */
+    public static Map<String, Object> toSearchUserPayload(UserDTO u) {
+        Map<String, Object> p = new LinkedHashMap<>();
+        p.put("userId", u.getId());
+        p.put("email", u.getEmail());
+        p.put("fullName", u.getFullName());
         return p;
     }
 }

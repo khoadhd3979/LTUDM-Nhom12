@@ -8,7 +8,7 @@ public final class MessageType {
     public static final String OK    = "OK";
     public static final String ERROR = "ERROR";
 
-    // Phase 2+: Authentication
+    // Phase 2: Authentication
     public static final String REGISTER   = "REGISTER";
     public static final String VERIFY_OTP = "VERIFY_OTP";
     public static final String LOGIN      = "LOGIN";
@@ -33,4 +33,7 @@ public final class MessageType {
     // Phase 4 — Push (server → client, inside SECURE_MESSAGE)
     public static final String PUSH_DIRECT_MESSAGE = "PUSH_DIRECT_MESSAGE";
     public static final String PUSH_GROUP_MESSAGE  = "PUSH_GROUP_MESSAGE";
+
+    // M1 — User lookup
+    public static final String SEARCH_USER = "SEARCH_USER";
 }
