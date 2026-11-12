@@ -1,6 +1,9 @@
-# SecureChat Protocol v0.4 — Secure Transport & E2EE
+# SecureChat Protocol v0.5 — Secure Transport & Application Commands
 
-> **v0.4 (M1 — Protocol Contract Repair):** Bổ sung §6 "Application Commands" — tài liệu hóa toàn bộ lệnh tầng ứng dụng theo source hiện hành, gồm lệnh mới `SEARCH_USER` và trường `msgType` cho lệnh chat. §1–§5 không thay đổi nội dung (chỉ đóng code fence bị thiếu ở cuối §5).
+> **v0.5 (M3 — Phase 4 Documentation):** Bổ sung tài liệu cho 9 command M3 đã triển khai và nghiệm thu trên server tại commit `ddabb69` (M3-B CLOSED — PASS): `UPDATE_PROFILE`, `REMOVE_GROUP_MEMBER`, `SET_GROUP_ROLE`, `MARK_READ`, `MESSAGE_STATUS`, `LOCK_USER`, `UNLOCK_USER`, `SYSTEM_BROADCAST`, `USER_STATS`. Mở rộng §6.7 (Push) với 3 push M3: `MESSAGE_STATUS {status:"SEEN"}`, `SYSTEM_BROADCAST {message}`, `ERROR {ACCOUNT_LOCKED}`. Mở rộng §6.8 (bảng lỗi). Thêm §6.10 (lệnh M3) và §6.11 (command không được hỗ trợ). §1–§6.6 và §6.9 giữ nguyên nội dung so với v0.4.
+>
+>
+> **Nguồn sự thật:** Nội dung §6.7–§6.11 được trích từ source tại `ddabb69`. Khi M3-A Design (v1 + Errata + Delta 2) khác source, tài liệu này mô tả theo source.
 
 ## 1. Transport & Framing
 - **Protocol:** TCP Socket qua cổng `SC_PORT` (mặc định `8080`).
@@ -14,6 +17,7 @@ Do dữ liệu mã hóa bọc Base64 2 lần làm tăng dung lượng khoảng 1
 - **Request Plaintext:** `{ "type": "...", "requestId": "...", "payload": {...} }`
 - **Response OK:** `{ "type": "OK", "requestId": "...", "status": "OK", "payload": {...} }`
 - **Response Error:** `{ "type": "ERROR", "requestId": "...", "status": "ERROR", "error": "CODE" }`
+- **Response Error có payload (M3):** khi lỗi mang dữ liệu cấu trúc (chỉ xảy ra với `CANNOT_LOCK_LAST_ADMIN_OF_GROUP` ở M3), packet lỗi có thêm `payload: {"groupIds":[<long>,...]}`. Với các lỗi khác, `payload` là `{}`.
 
 ## 4. Handshake Sequence (State Machine)
 1. `Client` $\rightarrow$ `Server`: `CLIENT_HELLO { version: "v1", clientNonce: b64(32B) }`
@@ -55,9 +59,9 @@ Toàn bộ lệnh trong mục này được gửi **bên trong `SECURE_MESSAGE`*
 ### 6.1. Quy ước chung
 
 - **Response thành công** của mọi lệnh dispatch đều có dạng `{ "type": "OK", "requestId": "...", "status": "OK", "payload": {...} }` (hằng `MessageType.OK`). Ngoại lệ duy nhất: `PING` trả `type: "PONG"`.
-- **Response lỗi** có dạng `{ "type": "ERROR", "requestId": "...", "status": "ERROR", "error": "<CODE>" }`. Mã lỗi lấy từ `BusinessException.getCode()` của tầng service; lỗi SQL được ánh xạ thành `DB_ERROR`, lỗi runtime không dự kiến thành `INTERNAL_ERROR`.
+- **Response lỗi** có dạng `{ "type": "ERROR", "requestId": "...", "status": "ERROR", "error": "<CODE>" }`. Mã lỗi lấy từ `BusinessException.getCode()` của tầng service; lỗi SQL được ánh xạ thành `DB_ERROR`, lỗi runtime không dự kiến thành `INTERNAL_ERROR`. **M3:** riêng `CANNOT_LOCK_LAST_ADMIN_OF_GROUP` mang `payload: {"groupIds":[<long>,...]}` (xem §6.10.6).
 - **Xác thực:** Trừ `REGISTER`, `VERIFY_OTP`, `LOGIN`, mọi lệnh đều yêu cầu session đã `LOGIN` thành công; chưa login → `UNAUTHENTICATED`. `senderId` luôn lấy từ session — Client **không** gửi và Server **không** đọc trường này từ payload.
-- Server **bỏ qua** các trường payload không được liệt kê trong tài liệu của từng lệnh.
+- Server **bỏ qua** các trường payload không được liệt kê trong tài liệu của từng lệnh (trừ `UPDATE_PROFILE` — xem §6.10.1).
 - `type` không thuộc danh sách lệnh → `UNKNOWN_TYPE`. Packet thiếu `type` → `MISSING_TYPE`.
 
 ### 6.2. Lệnh xác thực (Phase 2)
@@ -91,7 +95,7 @@ Dùng cho response của `REGISTER`, `VERIFY_OTP`, `LOGIN`:
 { "userId": 42, "email": "user@example.com", "fullName": "Nguyen Van A",
   "status": "ACTIVE", "gender": "MALE", "dateOfBirth": "2004-05-01" }
 ```
-`gender` và `dateOfBirth` chỉ xuất hiện khi có giá trị. Payload này **không** chứa `passwordHash` hay bất kỳ trường credential nào.
+`gender` và `dateOfBirth` chỉ xuất hiện khi có giá trị. Payload này **không** chứa `passwordHash` hay bất kỳ trường credential nào, và **không** chứa `is_system_admin` — cờ system-admin không được expose qua API.
 
 ### 6.3. SEARCH_USER (M1)
 
@@ -209,6 +213,8 @@ Dùng cho response của `SEND_*`, phần tử của `messages[]` trong `FETCH_*
 - **Response OK:** `{ groups: [ { groupId, groupName, createdBy, createdAt?, role? }, ... ] }` — `createdAt` (ISO-8601) và `role` chỉ xuất hiện khi có giá trị.
 - **Error:** `UNAUTHENTICATED`, `DB_ERROR`.
 
+**Ghi chú M3:** `ADD_GROUP_MEMBER` giờ thực thi atomic (member + audit cùng transaction), precedence chuẩn: `GROUP_NOT_FOUND` → `NOT_GROUP_ADMIN` → `TARGET_USER_NOT_FOUND` → `ALREADY_GROUP_MEMBER`. Contract lỗi không đổi.
+
 ### 6.7. Push messages (Server → Client)
 
 Push được gửi bên trong `SECURE_MESSAGE`, `requestId` có dạng `"push-<messageId>"`, `status: "OK"`. Payload là message payload (§6.5.1) **không có** trường `status`.
@@ -218,31 +224,72 @@ Push được gửi bên trong `SECURE_MESSAGE`, `requestId` có dạng `"push-<
 
 Client phải xử lý push theo `messageType` (đặc biệt `STICKER` — hiển thị asset tương ứng với mã trong `content`).
 
-### 6.8. Bảng mã lỗi tổng hợp
+#### MESSAGE_STATUS (push, M3)
+**Áp dụng: chỉ direct.** Server gửi push này tới **peer/sender** (người gửi tin nhắn) khi người nhận đánh dấu đã xem thành công qua một trong hai đường:
+- `MARK_READ` direct (§6.10.4) thành công (mỗi tin nhắn đơn lẻ), hoặc
+- `MESSAGE_STATUS` direct (§6.10.5) thành công **và** có ≥ 1 tin được đánh dấu.
 
-| Code | Ngữ cảnh |
-|---|---|
-| `UNAUTHENTICATED` | Chưa đăng nhập mà gọi lệnh cần xác thực |
-| `ALREADY_LOGGED_IN` | Đã đăng nhập mà gọi REGISTER/VERIFY_OTP/LOGIN, hoặc tài khoản đang online ở kết nối khác |
-| `NOT_LOGGED_IN` | LOGOUT khi chưa đăng nhập |
-| `UNKNOWN_TYPE` | `type` không thuộc danh sách lệnh |
-| `MISSING_TYPE` | Packet thiếu trường `type` |
-| `INVALID_MESSAGE` | Payload thiếu trường bắt buộc (ADD_GROUP_MEMBER) |
-| `DB_ERROR` | Lỗi SQL Server / tầng DAO |
-| `INTERNAL_ERROR` | Lỗi runtime không dự kiến |
-| `FRAME_TOO_LARGE` | Frame vượt 1,000,000 byte (kèm đóng kết nối) |
-| `EMAIL_INVALID` | Email rỗng hoặc sai định dạng |
-| `USER_NOT_FOUND` | SEARCH_USER không tìm thấy user ACTIVE khớp email |
-| `INVALID_MESSAGE_TYPE` | `msgType` ngoài `{TEXT, STICKER}` (gồm `FILE` ở M1) |
-| `RECEIVER_NOT_FOUND` / `RECEIVER_SELF` | Người nhận không tồn tại / gửi cho chính mình |
-| `CONTENT_INVALID` | Nội dung trống hoặc quá 4000 ký tự sau trim |
-| `GROUP_NOT_FOUND` / `NOT_GROUP_MEMBER` / `NOT_GROUP_ADMIN` | Nhóm không tồn tại / không phải thành viên / không phải ADMIN |
-| `GROUP_NAME_INVALID` | Tên nhóm trống hoặc quá 100 ký tự sau trim |
-| `TARGET_USER_NOT_FOUND` / `ALREADY_GROUP_MEMBER` | User đích không tồn tại / đã là thành viên nhóm |
-| `AUTH_FAILED`, `ACCOUNT_PENDING`, `ACCOUNT_LOCKED`, `ACCOUNT_NOT_PENDING` | Đăng nhập / xác thực OTP |
-| `EMAIL_EXISTS`, `EMAIL_SEND_FAILED` | Đăng ký |
-| `PASSWORD_REQUIRED`, `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, `FULLNAME_REQUIRED`, `INVALID_GENDER`, `INVALID_DATE_OF_BIRTH` | Validate đầu vào đăng ký |
-| `OTP_INVALID_FORMAT`, `OTP_NOT_FOUND`, `OTP_INVALID`, `OTP_EXPIRED`, `OTP_ATTEMPTS_EXCEEDED`, `OTP_ALREADY_USED` | Xác thực OTP |
+- **Type:** `MESSAGE_STATUS` (giống type Client dùng cho command — phân biệt qua hướng: C→S là command, S→C là push).
+- **Payload:** `{ "status": "SEEN" }` (không có field nào khác).
+- **Request ID:** `"push-read-<messageId>"` (sau MARK_READ) hoặc `"push-seen-<actorId>"` (sau MESSAGE_STATUS).
+- **Group:** **không** có push MESSAGE_STATUS. `MARK_READ` group và `MESSAGE_STATUS` group không phát push.
+
+#### SYSTEM_BROADCAST (push, M3)
+Server gửi push này tới mọi session online **trừ người gửi broadcast** (handler của admin được so sánh identity `==` và bị loại).
+
+- **Type:** `SYSTEM_BROADCAST` (cùng type với command C→S; phân biệt qua hướng).
+- **Payload:** `{ "message": "<nội dung broadcast>" }`. Không có `PUSH_SYSTEM_BROADCAST`.
+- **Request ID:** `"push-broadcast-<nanoTime>"`.
+- **Partial failure:** một handler nhận lỗi không ảnh hưởng các handler khác.
+
+#### ERROR {ACCOUNT_LOCKED} (push, M3)
+Khi admin lock một tài khoản đang online, sau khi commit transaction lock thành công, server:
+
+1. Gửi packet `ERROR` với `requestId: null`, `error: "ACCOUNT_LOCKED"` tới handler của target (best-effort — lỗi gửi không ảnh hưởng bước 2).
+2. **Đóng socket** của target (vô điều kiện, kể cả khi bước 1 fail).
+
+Đây **không phải type mới** — sử dụng type `ERROR` chuẩn. Client khi nhận ERROR {ACCOUNT_LOCKED} khi đang online phải đăng xuất bắt buộc và hiển thị lý do (xem Client Integration Guide).
+
+### 6.8. Bảng mã lỗi tổng hợp (mở rộng M3)
+
+| Code | Ngữ cảnh | M3 |
+|---|---|---|
+| `UNAUTHENTICATED` | Chưa đăng nhập mà gọi lệnh cần xác thực | ✓ |
+| `ALREADY_LOGGED_IN` | Đã đăng nhập / tài khoản đang online nơi khác | baseline |
+| `NOT_LOGGED_IN` | `LOGOUT` khi chưa đăng nhập | baseline |
+| `UNKNOWN_TYPE` | `type` không thuộc danh sách lệnh | ✓ |
+| `MISSING_TYPE` | Packet thiếu trường `type` | baseline |
+| `INVALID_MESSAGE` | Payload thiếu trường bắt buộc / sai định dạng chung | ✓ (M3 dùng thêm cho `MESSAGE_STATUS`, `MARK_READ`, `LOCK_USER`, `UNLOCK_USER`, `SYSTEM_BROADCAST`) |
+| `DB_ERROR` | Lỗi SQL Server / DAO | ✓ |
+| `INTERNAL_ERROR` | Lỗi runtime không dự kiến | baseline |
+| `FRAME_TOO_LARGE` | Frame vượt 1,000,000 byte (kèm đóng socket) | baseline |
+| `EMAIL_INVALID`, `USER_NOT_FOUND` | SEARCH_USER / xác thực | baseline + ✓ (M3 `LOCK_USER`) |
+| `INVALID_MESSAGE_TYPE` | `msgType` ngoài `{TEXT, STICKER}` | baseline |
+| `RECEIVER_NOT_FOUND`, `RECEIVER_SELF` | Chat 1-1 | baseline |
+| `CONTENT_INVALID` | Nội dung trống hoặc > 4000 ký tự | baseline |
+| `GROUP_NOT_FOUND`, `NOT_GROUP_MEMBER`, `NOT_GROUP_ADMIN` | Nhóm | ✓ |
+| `GROUP_NAME_INVALID` | Tên nhóm trống hoặc > 100 ký tự | baseline |
+| `TARGET_USER_NOT_FOUND`, `ALREADY_GROUP_MEMBER` | Thêm thành viên | ✓ |
+| **`TARGET_NOT_IN_GROUP`** | `REMOVE_GROUP_MEMBER` / `SET_GROUP_ROLE` — target không phải thành viên nhóm | ✓ M3 |
+| **`LAST_ADMIN_REQUIRED`** | `REMOVE_GROUP_MEMBER` / `SET_GROUP_ROLE` — không thể xóa / hạ quyền ADMIN cuối | ✓ M3 |
+| **`INVALID_ROLE`** | `SET_GROUP_ROLE` — `newRole` không thuộc `{ADMIN, MEMBER}` | ✓ M3 |
+| **`INVALID_FIELD`** | `UPDATE_PROFILE` — payload chứa field ngoài `{fullName, gender, dateOfBirth}` | ✓ M3 |
+| **`MESSAGE_NOT_FOUND`** | `MARK_READ` direct — `messageId` không tồn tại | ✓ M3 |
+| **`NOT_MESSAGE_RECIPIENT`** | `MARK_READ` — actor không phải người nhận (direct) hoặc không có receipt (group) | ✓ M3 |
+| **`AMBIGUOUS_GROUP_NAME`** | `MESSAGE_STATUS` group — resolve tên nhóm ra ≥ 2 kết quả | ✓ M3 |
+| **`NOT_SYSTEM_ADMIN`** | `LOCK_USER` / `UNLOCK_USER` / `SYSTEM_BROADCAST` / `USER_STATS` — actor không phải system admin | ✓ M3 |
+| **`USER_ALREADY_LOCKED`** | `LOCK_USER` — target đã ở trạng thái LOCKED | ✓ M3 |
+| **`USER_NOT_LOCKED`** | `UNLOCK_USER` — target không ở trạng thái LOCKED | ✓ M3 |
+| **`CANNOT_LOCK_SELF`** | `LOCK_USER` — actor = target | ✓ M3 |
+| **`CANNOT_LOCK_LAST_ADMIN_OF_GROUP`** | `LOCK_USER` — target là ACTIVE ADMIN cuối của ≥ 1 group. **Payload chứa `{"groupIds":[<long>,...]}`** (sorted ASC). | ✓ M3 |
+| **`ACCOUNT_LOCKED`** | Push (ERROR) tới target đang online khi bị lock. Không phải error code trả về cho requester của `LOCK_USER`. | ✓ M3 |
+| `AUTH_FAILED`, `ACCOUNT_PENDING`, `ACCOUNT_LOCKED` (login), `ACCOUNT_NOT_PENDING` | Xác thực | baseline |
+| `EMAIL_EXISTS`, `EMAIL_SEND_FAILED` | Đăng ký | baseline |
+| `PASSWORD_REQUIRED`, `PASSWORD_TOO_SHORT`, `PASSWORD_TOO_LONG`, `FULLNAME_REQUIRED`, `INVALID_GENDER`, `INVALID_DATE_OF_BIRTH` | Validate đăng ký | baseline |
+| `FULLNAME_INVALID` | `UPDATE_PROFILE` — họ tên không hợp lệ | ✓ M3 |
+| `OTP_INVALID_FORMAT`, `OTP_NOT_FOUND`, `OTP_INVALID`, `OTP_EXPIRED`, `OTP_ATTEMPTS_EXCEEDED`, `OTP_ALREADY_USED` | OTP | baseline |
+
+> **Ghi chú:** `INVALID_STATUS` không tồn tại trong source tại `ddabb69`. `MESSAGE_STATUS` với `status != "SEEN"` trả `INVALID_MESSAGE`.
 
 ### 6.9. File transfer (planned — M4)
 
@@ -251,3 +298,304 @@ Client phải xử lý push theo `messageType` (đặc biệt `STICKER` — hi�
 - File transfer **không** dùng `msgType = FILE` trên các lệnh chat (§6.4).
 - Client hiện đã có code gửi packet `FILE_CHUNK` (chunk Base64, kích thước chunk mặc định 8 KiB theo `FileChunkUtils`, nằm trong trần 256 KiB/packet ở §2) — Server **chưa có handler** cho `FILE_CHUNK` ở M1 nên packet này hiện nhận `UNKNOWN_TYPE`.
 - Contract chi tiết sẽ chốt ở M4 với **baseline là protocol `FILE_CHUNK` Client hiện có**; không thiết kế bộ packet thay thế.
+
+### 6.10. Lệnh M3 (C→S)
+
+Tất cả lệnh dưới đây **yêu cầu đã LOGIN** (nếu không → `UNAUTHENTICATED`). `actorId` luôn lấy từ session — Client không gửi.
+
+#### 6.10.1. UPDATE_PROFILE
+
+**Quyền:** bất kỳ user đã LOGIN. Actor chỉ sửa profile của chính mình.
+
+**Request:**
+```json
+{ "type": "UPDATE_PROFILE", "requestId": "u-1",
+  "payload": { "fullName": "Nguyen Van A", "gender": "MALE", "dateOfBirth": "2000-05-01" } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `fullName` | string | ✅ | Trim, 1..120 ký tự |
+| `gender` | string | ✅ (có thể null) | `{MALE, FEMALE, OTHER}` hoặc null. Case-insensitive, chuẩn hóa uppercase |
+| `dateOfBirth` | string | ✅ (có thể null) | `yyyy-MM-dd`, ≤ hôm nay |
+
+**Payload restriction:** chỉ 3 field trên được phép có mặt. Bất kỳ field khác (kể cả `email`, `password`, `status`, `isSystemAdmin`) → `INVALID_FIELD`. **Khác với các command khác** — Server **không** silently ignore field thừa.
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "u-1", "status": "OK",
+  "payload": { "userId": 42, "email": "user@example.com", "fullName": "Nguyen Van A",
+               "status": "ACTIVE", "gender": "MALE", "dateOfBirth": "2000-05-01" } }
+```
+
+**Side effects:** transaction ghi `UPDATE dbo.users` + `INSERT activity_logs` (action_type `PROFILE_UPDATED`) cùng connection. Rollback toàn bộ nếu một trong hai fail.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_FIELD`, `FULLNAME_REQUIRED`, `FULLNAME_INVALID`, `INVALID_GENDER`, `INVALID_DATE_OF_BIRTH`, `DB_ERROR`.
+
+#### 6.10.2. REMOVE_GROUP_MEMBER
+
+**Quyền:** group ADMIN, **hoặc** actor = target (tự rời nhóm). Không phải self và không phải admin → `NOT_GROUP_ADMIN`.
+
+**Request:**
+```json
+{ "type": "REMOVE_GROUP_MEMBER", "requestId": "r-1",
+  "payload": { "groupId": 5, "targetUserId": 42 } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `groupId` | long | ✅ | > 0. Thiếu/≤ 0 → `INVALID_MESSAGE` |
+| `targetUserId` | long | ✅ | > 0. Thiếu/≤ 0 → `INVALID_MESSAGE` |
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "r-1", "status": "OK",
+  "payload": { "groupId": 5, "removedUserId": 42 } }
+```
+
+**Last-admin invariant:** nếu target là ACTIVE ADMIN cuối cùng của group → `LAST_ADMIN_REQUIRED`. Áp dụng cả remove bởi admin khác lẫn self-leave.
+
+**Transaction:** `lockMemberUserIds` + `lockActiveAdminIds` với UPDLOCK/HOLDLOCK; xóa member + audit `GROUP_MEMBER_REMOVED` cùng connection.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `TARGET_NOT_IN_GROUP`, `NOT_GROUP_ADMIN`, `LAST_ADMIN_REQUIRED`, `DB_ERROR`.
+
+#### 6.10.3. SET_GROUP_ROLE
+
+**Quyền:** group ADMIN.
+
+**Request:**
+```json
+{ "type": "SET_GROUP_ROLE", "requestId": "sr-1",
+  "payload": { "groupId": 5, "targetUserId": 42, "newRole": "ADMIN" } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `groupId` | long | ✅ | > 0 |
+| `targetUserId` | long | ✅ | > 0 |
+| `newRole` | string | ✅ | `{ADMIN, MEMBER}` (case-insensitive, chuẩn hóa uppercase) |
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "sr-1", "status": "OK",
+  "payload": { "groupId": 5, "targetUserId": 42, "newRole": "ADMIN" } }
+```
+
+**Idempotent:** nếu `newRole` = role hiện tại của target → **OK ngay, không audit**. Demote ADMIN cuối → `LAST_ADMIN_REQUIRED`.
+
+**Transaction:** khóa member list + check actor role + check idempotent + check last-admin (nếu demote) + update + audit `GROUP_ROLE_CHANGED` cùng connection.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `INVALID_ROLE`, `TARGET_NOT_IN_GROUP`, `NOT_GROUP_ADMIN`, `LAST_ADMIN_REQUIRED`, `DB_ERROR`.
+
+#### 6.10.4. MARK_READ (canonical — message-level)
+
+**Quyền:** user đã LOGIN. Direct: chỉ receiver. Group: user có receipt.
+
+**Request:**
+```json
+{ "type": "MARK_READ", "requestId": "mr-1",
+  "payload": { "messageType": "DIRECT", "messageId": 1001 } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `messageType` | string | ✅ | `{DIRECT, GROUP}` (case-insensitive). Không thuộc → `INVALID_MESSAGE` |
+| `messageId` | long | ✅ | > 0. Thiếu/≤ 0 → `INVALID_MESSAGE` |
+
+**Response OK — DIRECT:**
+```json
+{ "type": "OK", "requestId": "mr-1", "status": "OK",
+  "payload": { "messageId": 1001, "messageType": "DIRECT", "status": "READ" } }
+```
+
+> **Khác v0.4 design:** response **không** chứa `readAt`. Chỉ trả `status` từ DTO sau refetch. Không dùng `sentAt` thay thế.
+
+**Response OK — GROUP:**
+```json
+{ "type": "OK", "requestId": "mr-2", "status": "OK",
+  "payload": { "messageId": 2002, "messageType": "GROUP" } }
+```
+
+**Side effects:**
+- DIRECT thành công → update `direct_messages.status='READ'`, `read_at=NOW`, push `MESSAGE_STATUS {status:"SEEN"}` về sender (nếu online).
+- GROUP thành công → update receipt `delivered_at = COALESCE(delivered_at, NOW)`, `read_at = NOW`. **Không push.**
+- Idempotent: gọi lại khi đã READ → trả DTO refetch (status `READ`), không push lại.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `MESSAGE_NOT_FOUND`, `NOT_MESSAGE_RECIPIENT`, `DB_ERROR`.
+
+#### 6.10.5. MESSAGE_STATUS (legacy — conversation-level)
+
+**Quyền:** user đã LOGIN. Đánh dấu toàn bộ tin chưa đọc trong hội thoại.
+
+**Request:**
+```json
+{ "type": "MESSAGE_STATUS", "requestId": "ms-1",
+  "payload": { "target": "peer@example.com", "isGroup": false, "status": "SEEN" } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `target` | string | ✅ | Direct: email peer (dùng `SEARCH_USER` semantics). Group: tên nhóm (trim, khớp chính xác) |
+| `isGroup` | boolean | ✅ | false = direct, true = group |
+| `status` | string | ✅ | Chỉ chấp nhận `"SEEN"`. Giá trị khác → `INVALID_MESSAGE` |
+
+**Response OK — DIRECT:**
+```json
+{ "type": "OK", "requestId": "ms-1", "status": "OK",
+  "payload": { "markedCount": 3, "peerUserId": 42 } }
+```
+
+**Response OK — GROUP:**
+```json
+{ "type": "OK", "requestId": "ms-2", "status": "OK",
+  "payload": { "markedCount": 10, "groupId": 5 } }
+```
+
+**Group target resolution:** `findGroupsForUser(actorId)` → lọc theo tên chính xác sau trim. 0 kết quả → `GROUP_NOT_FOUND`. ≥ 2 kết quả → `AMBIGUOUS_GROUP_NAME` (không tự chọn). `groups.group_name` không có UNIQUE constraint.
+
+**Side effects:**
+- DIRECT: bulk update các tin chưa đọc từ peer. **Chỉ khi `markedCount > 0`** mới push `MESSAGE_STATUS {status:"SEEN"}` về peer.
+- GROUP: bulk update receipt chưa đọc của actor trong group. **Không push.**
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `EMAIL_INVALID`, `USER_NOT_FOUND`, `GROUP_NOT_FOUND`, `AMBIGUOUS_GROUP_NAME`, `NOT_GROUP_MEMBER`, `DB_ERROR`.
+
+#### 6.10.6. LOCK_USER
+
+**Quyền:** system admin (ACTIVE + `is_system_admin=1`).
+
+**Request:**
+```json
+{ "type": "LOCK_USER", "requestId": "lk-1",
+  "payload": { "targetUserId": 42, "reason": "spam" } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `targetUserId` | long | ✅ | > 0. Thiếu/≤ 0 → `INVALID_MESSAGE` |
+| `reason` | string | ❌ | Không validation bắt buộc. Null/blank được chấp nhận (chỉ dùng cho audit metadata) |
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "lk-1", "status": "OK",
+  "payload": { "targetUserId": 42, "status": "LOCKED" } }
+```
+
+**Response lỗi — `CANNOT_LOCK_LAST_ADMIN_OF_GROUP`:**
+```json
+{ "type": "ERROR", "requestId": "lk-1", "status": "ERROR",
+  "error": "CANNOT_LOCK_LAST_ADMIN_OF_GROUP",
+  "payload": { "groupIds": [5, 12] } }
+```
+
+- `groupIds` là JSON array các group_id bị chặn, **sorted ASC**, kiểu `List<Long>`.
+- Nằm trong `payload` (không có key `details` ở cấp ngoài cùng).
+
+**Kiểm tra trước transaction:** `CANNOT_LOCK_SELF` (actor = target).
+
+**Trong transaction:** khóa `group_members` của target với UPDLOCK/HOLDLOCK (sorted ASC by group_id → tránh deadlock). Với mỗi group mà target là admin: đếm ACTIVE ADMIN. Nếu group nào có đúng 1 và là target → gom `group_id` vào blocked list. Nếu blocked non-empty → rollback + throw `CANNOT_LOCK_LAST_ADMIN_OF_GROUP` với details.
+
+Nếu pass: update `users.status='LOCKED'` + audit `USER_LOCKED` cùng connection → commit.
+
+**Sau commit (ngoài transaction):** nếu target đang online → gửi ERROR {ACCOUNT_LOCKED} (best-effort) rồi close socket.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `NOT_SYSTEM_ADMIN`, `CANNOT_LOCK_SELF`, `USER_NOT_FOUND`, `USER_ALREADY_LOCKED`, `CANNOT_LOCK_LAST_ADMIN_OF_GROUP`, `DB_ERROR`.
+
+#### 6.10.7. UNLOCK_USER
+
+**Quyền:** system admin.
+
+**Request:**
+```json
+{ "type": "UNLOCK_USER", "requestId": "ul-1",
+  "payload": { "targetUserId": 42 } }
+```
+
+| Field | Kiểu | Bắt buộc |
+|---|---|---|
+| `targetUserId` | long | ✅ (> 0) |
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "ul-1", "status": "OK",
+  "payload": { "targetUserId": 42, "status": "ACTIVE" } }
+```
+
+**Side effects:** update status + audit `USER_UNLOCKED` cùng transaction.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `NOT_SYSTEM_ADMIN`, `USER_NOT_FOUND`, `USER_NOT_LOCKED`, `DB_ERROR`.
+
+#### 6.10.8. SYSTEM_BROADCAST
+
+**Quyền:** system admin.
+
+**Request:**
+```json
+{ "type": "SYSTEM_BROADCAST", "requestId": "bc-1",
+  "payload": { "message": "Server bảo trì lúc 22:00" } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `message` | string | ✅ | Trim, 1..1000 ký tự. Vi phạm → `INVALID_MESSAGE` |
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "bc-1", "status": "OK",
+  "payload": { "recipientCount": 15, "successCount": 14, "failedCount": 1 } }
+```
+
+- `recipientCount` = `successCount + failedCount` (đã loại trừ caller).
+- `successCount` = số handler `sendSecure` trả `true`.
+- `failedCount` = số handler lỗi/không gửi được.
+- Partial failure semantics: handler lỗi không ảnh hưởng handler khác.
+
+**Side effects:** fanout qua `snapshotOnlineHandlers()`; loại trừ handler của actor (so sánh `==`). Audit `SYSTEM_BROADCAST` ghi **sau** fanout bằng connection riêng (best-effort, lỗi audit chỉ log WARN).
+
+**Push type:** `SYSTEM_BROADCAST` với payload `{ "message": "..." }`.
+
+**Error:** `UNAUTHENTICATED`, `INVALID_MESSAGE`, `NOT_SYSTEM_ADMIN`, `DB_ERROR`.
+
+#### 6.10.9. USER_STATS
+
+**Quyền:** system admin.
+
+**Request:**
+```json
+{ "type": "USER_STATS", "requestId": "us-1", "payload": {} }
+```
+
+**Response OK:**
+```json
+{ "type": "OK", "requestId": "us-1", "status": "OK",
+  "payload": {
+    "totalUsers": 120, "activeUsers": 100, "pendingUsers": 15, "lockedUsers": 5,
+    "totalGroups": 30, "onlineUsers": 42
+  } }
+```
+
+| Key | Nguồn |
+|---|---|
+| `totalUsers` | `COUNT(*) users` |
+| `activeUsers` | `COUNT(*) users WHERE status='ACTIVE'` |
+| `pendingUsers` | `COUNT(*) users WHERE status='PENDING'` |
+| `lockedUsers` | `COUNT(*) users WHERE status='LOCKED'` |
+| `totalGroups` | `COUNT(*) groups` |
+| `onlineUsers` | `ClientConnectionManager.onlineCount()` |
+
+> **Đối chiếu §5.2.8 (M3-A):** Bộ 6 metric này khớp response contract của §5.2.8. Tên khóa metric số nhóm là `totalGroups` theo quyết định chốt P-10 ngày 2026-11-13 (bản draft §5.2.8 ghi `groupsCount` — đã được thay thế bởi quyết định này).
+
+**Error:** `UNAUTHENTICATED`, `NOT_SYSTEM_ADMIN`, `DB_ERROR`.
+
+### 6.11. Command không được hỗ trợ (deferral register)
+
+Các type dưới đây **không** có handler phía Server tại thời điểm viết (ddabb69). Nếu Client gửi, Server trả `UNKNOWN_TYPE`.
+
+| Type | Lý do | Command thay thế / ghi chú |
+|---|---|---|
+| `JOIN_GROUP` | OD-4 — không có cơ chế group public / tự tham gia | Không có. Admin phải `ADD_GROUP_MEMBER` |
+| `LEAVE_GROUP` | Không có command riêng | Dùng `REMOVE_GROUP_MEMBER` với `targetUserId` = chính actor (self-leave; vẫn kiểm tra last-admin) |
+| `ADD_FRIEND` | Social friend request chưa duyệt | Không có |
+| `FRIEND_STATUS` | Chưa duyệt — Server **không** gửi push này | Không có |
+| `BLOCK_USER` | Khác `LOCK_USER` (user-level block vs system-admin lock); chưa triển khai | Không có. `LOCK_USER` chỉ dành cho system-admin |
+| `SEND_STICKER` | Không có command riêng | Dùng `SEND_DIRECT_MESSAGE` / `SEND_GROUP_MESSAGE` với `msgType = "STICKER"` |
+| `FILE_CHUNK` | M4 — xem §6.9 | Chưa hỗ trợ |

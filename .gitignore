@@ -40,3 +40,4 @@ target/
 *.iml
 out/
 _legacy/
+schema_m2.sql
