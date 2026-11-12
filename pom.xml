@@ -22,7 +22,6 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <jackson.version>2.17.2</jackson.version>
         <mssql.version>12.8.1.jre11</mssql.version>
-        <jbcrypt.version>0.4</jbcrypt.version>
         <jakarta.mail.version>2.0.1</jakarta.mail.version>
         <slf4j.version>2.0.13</slf4j.version>
         <dotenv.version>3.0.0</dotenv.version>
@@ -54,12 +53,6 @@
                 <version>${mssql.version}</version>
             </dependency>
 
-            <!-- Password hash (Phase 2) -->
-            <dependency>
-                <groupId>org.mindrot</groupId>
-                <artifactId>jbcrypt</artifactId>
-                <version>${jbcrypt.version}</version>
-            </dependency>
 
             <!-- JavaMail gửi OTP qua Gmail SMTP (Phase 2) -->
             <dependency>
