@@ -44,4 +44,9 @@ public final class AppConfig {
 
 
     public static String identityKeyPath() { return env("SC_IDENTITY_KEY_PATH", "./server_identity.key"); }
+    
+    public static String bootstrapAdminEmail() {
+        String v = getVal("SC_BOOTSTRAP_ADMIN_EMAIL");
+        return (v == null || v.isBlank()) ? null : v.trim();
+    }
 }

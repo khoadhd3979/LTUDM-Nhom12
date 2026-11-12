@@ -66,6 +66,6 @@ BEGIN CATCH
         -- Bỏ qua: database có thể đã bị xóa một phần
     END CATCH
 
-    THROW;
+    ;THROW;
 END CATCH
 GO

@@ -65,10 +65,14 @@ BEGIN TRY
             updated_at DATETIME2(3) NOT NULL
                 CONSTRAINT DF_users_updated_at DEFAULT SYSUTCDATETIME(),
             last_seen_at DATETIME2(3) NULL,
+            is_system_admin BIT NOT NULL
+            CONSTRAINT DF_users_is_system_admin DEFAULT 0,
             CONSTRAINT PK_users PRIMARY KEY (id),
             CONSTRAINT UQ_users_email UNIQUE (email),
             CONSTRAINT CK_users_gender CHECK (gender IN ('MALE','FEMALE','OTHER')),
             CONSTRAINT CK_users_status CHECK (status IN ('PENDING','ACTIVE','LOCKED'))
+
+            
         );
     END
     ELSE PRINT 'Skip dbo.users: exists.';
@@ -483,10 +487,11 @@ ORDER BY table_name, index_name;
 GO
 
 -- 5.5 Columns kiểm tra password_hash
-PRINT '=== 5.5 users.password_hash length ===';
-SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
+PRINT '=== 5.5 users columns ===';
+SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE, COLUMN_DEFAULT
 FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='users' AND COLUMN_NAME IN ('password_hash','last_seen_at');
+WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='users'
+    AND COLUMN_NAME IN ('password_hash','last_seen_at','is_system_admin');
 GO
 
 -- 5.6 Orphan checks

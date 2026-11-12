@@ -21,6 +21,7 @@ public final class InputValidator {
     private static final int FULLNAME_MAX = 120;
     private static final Set<String> GENDERS = Set.of("MALE", "FEMALE", "OTHER");
     private static final Set<String> MESSAGE_TYPES_M1 = Set.of("TEXT", "STICKER");
+    private static final int BROADCAST_MAX = 1000;
 
     private InputValidator() {}
 
@@ -120,4 +121,48 @@ public final class InputValidator {
         }
         return upper;
     }
+
+    /** [M3-B] Validate profile payload — chỉ 3 field được phép có mặt. */
+    public static void validateProfileAllowedFields(java.util.Map<String, Object> payload) {
+        if (payload == null) return;
+        String[] allowed = {"fullName", "gender", "dateOfBirth"};
+        for (String k : payload.keySet()) {
+            boolean ok = false;
+            for (String a : allowed) if (a.equals(k)) { ok = true; break; }
+            if (!ok) throw new BusinessException("INVALID_FIELD",
+                    "Trường không được phép cập nhật: " + k);
+        }
+    }
+
+    /** [M3-B] newRole ∈ {ADMIN, MEMBER}. */
+    public static String validateGroupRole(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new BusinessException("INVALID_ROLE", "Role bắt buộc");
+        String r = raw.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!"ADMIN".equals(r) && !"MEMBER".equals(r))
+            throw new BusinessException("INVALID_ROLE", "Role phải là ADMIN hoặc MEMBER");
+        return r;
+    }
+
+    /** [M3-B] messageType ∈ {DIRECT, GROUP}. */
+    public static String validateMarkReadType(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new BusinessException("INVALID_MESSAGE", "messageType bắt buộc");
+        String t = raw.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!"DIRECT".equals(t) && !"GROUP".equals(t))
+            throw new BusinessException("INVALID_MESSAGE", "messageType phải DIRECT/GROUP");
+        return t;
+    }
+
+    /** [M3-B] Broadcast 1..1000 ký tự. */
+    public static String validateBroadcastMessage(String raw) {
+        if (raw == null || raw.isBlank())
+            throw new BusinessException("INVALID_MESSAGE", "Nội dung broadcast bắt buộc");
+        String t = raw.trim();
+        if (t.length() > BROADCAST_MAX)
+            throw new BusinessException("INVALID_MESSAGE",
+                    "Broadcast tối đa " + BROADCAST_MAX + " ký tự");
+        return t;
+    }
+
 }

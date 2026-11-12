@@ -21,6 +21,11 @@
 | 7 | `group_messages` | Tin nhóm | `message_id` | sender → users; group → groups CASCADE; attachment → attachments |
 | 8 | `group_message_receipts` | Trạng thái per-member cho tin nhóm | `(message_id, user_id)` | message → group_messages CASCADE; user → users (KHÔNG cascade từ group_members) |
 | 9 | `activity_logs` | Audit log | `log_id` | actor → users (nullable) |
+### Users — cột bổ sung M3-B
+
+| Cột | Kiểu | Default | Ghi chú |
+|---|---|---|---|
+| `is_system_admin` | `BIT NOT NULL` | `0` | Đánh dấu system administrator. Cấp qua `BootstrapAdmin` tool (thủ công 1 lần). Không cấp qua API. |
 
 ## Cột nhạy cảm
 
@@ -41,3 +46,4 @@
 $env:SC_DB_URL      = "jdbc:sqlserver://localhost:1433;databaseName=SecureChatDB;encrypt=true;trustServerCertificate=true"
 $env:SC_DB_USER     = "sa"
 $env:SC_DB_PASSWORD = "<your-password>"
+

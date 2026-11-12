@@ -13,7 +13,8 @@ public class UserDTO {
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private LocalDateTime lastSeenAt;   // [M2-B] MỚI
+    private LocalDateTime lastSeenAt;   
+    private boolean isSystemAdmin;
 
     public long getId() { return id; }
     public void setId(long id) { this.id = id; }
@@ -35,4 +36,6 @@ public class UserDTO {
     public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
     public LocalDateTime getLastSeenAt() { return lastSeenAt; }
     public void setLastSeenAt(LocalDateTime lastSeenAt) { this.lastSeenAt = lastSeenAt; }
+    public boolean isSystemAdmin() { return isSystemAdmin; }
+    public void setSystemAdmin(boolean systemAdmin) { isSystemAdmin = systemAdmin; }
 }
