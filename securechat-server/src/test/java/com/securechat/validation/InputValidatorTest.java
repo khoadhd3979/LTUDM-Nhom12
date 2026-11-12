@@ -56,4 +56,24 @@ class InputValidatorTest {
                 () -> InputValidator.validateGroupName("a".repeat(101)));
         assertEquals("Team A", InputValidator.validateGroupName("  Team A  "));
     }
+    @Test
+    void validateMsgTypeBoundaries() {
+        // Empty / null → default TEXT
+        assertEquals("TEXT", InputValidator.validateMsgType(null));
+        assertEquals("TEXT", InputValidator.validateMsgType(""));
+        assertEquals("TEXT", InputValidator.validateMsgType("   "));
+
+        // Valid (case-insensitive)
+        assertEquals("TEXT", InputValidator.validateMsgType("text"));
+        assertEquals("TEXT", InputValidator.validateMsgType("TEXT"));
+        assertEquals("STICKER", InputValidator.validateMsgType("sticker"));
+        assertEquals("STICKER", InputValidator.validateMsgType("STICKER"));
+        assertEquals("STICKER", InputValidator.validateMsgType("  Sticker  "));
+
+        // Invalid
+        assertThrows(BusinessException.class, () -> InputValidator.validateMsgType("FILE"));
+        assertThrows(BusinessException.class, () -> InputValidator.validateMsgType("VIDEO"));
+        assertThrows(BusinessException.class, () -> InputValidator.validateMsgType("AUDIO"));
+        assertThrows(BusinessException.class, () -> InputValidator.validateMsgType("text;DROP"));
+    }
 }

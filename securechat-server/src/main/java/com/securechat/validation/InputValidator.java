@@ -16,14 +16,14 @@ public final class InputValidator {
             Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
     private static final Pattern OTP_6 = Pattern.compile("^\\d{6}$");
     private static final int PASSWORD_MIN = 8;
-    private static final int PASSWORD_MAX = 72;   // BCrypt max UTF-8 bytes
+    private static final int PASSWORD_MAX = 72;
     private static final int FULLNAME_MIN = 1;
     private static final int FULLNAME_MAX = 120;
     private static final Set<String> GENDERS = Set.of("MALE", "FEMALE", "OTHER");
+    private static final Set<String> MESSAGE_TYPES_M1 = Set.of("TEXT", "STICKER");
 
     private InputValidator() {}
 
-    /** @return normalized email (trim + lowercase). */
     public static String validateEmail(String email) {
         if (email == null || email.isBlank()) throw new BusinessException("EMAIL_INVALID", "Email bắt buộc");
         String t = email.trim().toLowerCase(Locale.ROOT);
@@ -42,7 +42,6 @@ public final class InputValidator {
             throw new BusinessException("PASSWORD_TOO_LONG", "Mật khẩu tối đa " + PASSWORD_MAX + " byte UTF-8");
     }
 
-    /** @return trimmed full name. */
     public static String validateFullName(String fullName) {
         if (fullName == null || fullName.isBlank())
             throw new BusinessException("FULLNAME_REQUIRED", "Họ tên bắt buộc");
@@ -52,7 +51,6 @@ public final class InputValidator {
         return t;
     }
 
-    /** @return uppercase gender or null if input blank/null. */
     public static String validateGender(String gender) {
         if (gender == null || gender.isBlank()) return null;
         String g = gender.trim().toUpperCase(Locale.ROOT);
@@ -61,12 +59,12 @@ public final class InputValidator {
         return g;
     }
 
-    /** @return parsed date or null if blank/null. Format: ISO yyyy-MM-dd. */
     public static LocalDate validateDateOfBirth(String dateOfBirth) {
         if (dateOfBirth == null || dateOfBirth.isBlank()) return null;
         try {
             LocalDate d = LocalDate.parse(dateOfBirth.trim());
-            if (d.isAfter(LocalDate.now())) throw new BusinessException("INVALID_DATE_OF_BIRTH", "Ngày sinh không hợp lệ");
+            if (d.isAfter(LocalDate.now()))
+                throw new BusinessException("INVALID_DATE_OF_BIRTH", "Ngày sinh không hợp lệ");
             return d;
         } catch (DateTimeParseException e) {
             throw new BusinessException("INVALID_DATE_OF_BIRTH", "Ngày sinh phải có định dạng yyyy-MM-dd");
@@ -78,9 +76,8 @@ public final class InputValidator {
             throw new BusinessException("OTP_INVALID_FORMAT", "OTP phải là 6 chữ số");
     }
 
-    // Giữ lại hàm tiện ích từ code 1
-    public static boolean isBlank(String s) { 
-        return s == null || s.isBlank(); 
+    public static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     /** @return content đã trim, non-empty, ≤ 4000 ký tự. */
@@ -93,7 +90,7 @@ public final class InputValidator {
         return trimmed;
     }
 
-    /** @return tên nhóm đã trim, 1..100 ký tự (khớp CK_groups_name_len). */
+    /** @return tên nhóm đã trim, 1..100 ký tự. */
     public static String validateGroupName(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException("GROUP_NAME_INVALID", "Tên nhóm không được để trống");
@@ -107,5 +104,20 @@ public final class InputValidator {
     public static int normalizeHistoryLimit(int limit) {
         if (limit <= 0) return 30;
         return Math.min(limit, 100);
+    }
+
+    /**
+     * [M1] Chuẩn hóa msgType.
+     * Mặc định "TEXT" khi vắng. Chỉ chấp nhận TEXT hoặc STICKER.
+     * FILE chưa được hỗ trợ ở M1 (sẽ mở ở M4).
+     */
+    public static String validateMsgType(String raw) {
+        if (raw == null || raw.isBlank()) return "TEXT";
+        String upper = raw.trim().toUpperCase(Locale.ROOT);
+        if (!MESSAGE_TYPES_M1.contains(upper)) {
+            throw new BusinessException("INVALID_MESSAGE_TYPE",
+                    "msgType phải là TEXT hoặc STICKER (FILE chưa hỗ trợ)");
+        }
+        return upper;
     }
 }

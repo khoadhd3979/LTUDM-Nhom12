@@ -119,13 +119,31 @@ public class UserDAO {
     }
 
     public boolean existsById(long userId) throws SQLException {
-    String sql = "SELECT 1 FROM dbo.users WHERE id = ?";
-    try (Connection c = DBConnection.open();
-         PreparedStatement ps = c.prepareStatement(sql)) {
-        ps.setLong(1, userId);
-        try (ResultSet rs = ps.executeQuery()) {
-            return rs.next();
+        String sql = "SELECT 1 FROM dbo.users WHERE id = ?";
+        try (Connection c = DBConnection.open();
+            PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         }
     }
-}
+    public Optional<UserDTO> findActiveByEmail(String email) throws SQLException {
+        String sql = "SELECT id, email, full_name FROM dbo.users " +
+                    "WHERE email = ? AND status = 'ACTIVE'";
+        try (Connection c = DBConnection.open();
+            PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, email);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) return Optional.empty();
+                UserDTO u = new UserDTO();
+                u.setId(rs.getLong("id"));
+                u.setEmail(rs.getString("email"));
+                u.setFullName(rs.getString("full_name"));
+                u.setStatus("ACTIVE");   // ngầm định
+                return Optional.of(u);
+            }
+        }
+    }
+
 }

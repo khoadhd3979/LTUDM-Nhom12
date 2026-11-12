@@ -353,6 +353,13 @@ public class ClientHandler implements Runnable {
                     this.currentUser = null;
                     return Packet.ok(MessageType.OK, reqId, Collections.emptyMap());
                 }
+                case MessageType.SEARCH_USER: {
+                    long senderId = getCurrentUserId();
+                    if (senderId <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    UserDTO found = chatService.searchUser(getStr(p, "email"));
+                    return Packet.ok(MessageType.OK, reqId,
+                            ChatService.toSearchUserPayload(found));
+                }
 
                 // ---- Phase 4 — Chat ----
                 case MessageType.SEND_DIRECT_MESSAGE: {
@@ -361,7 +368,7 @@ public class ClientHandler implements Runnable {
                     Long rid = getLongOrNull(p, "receiverId");
                     if (rid == null || rid <= 0L) return Packet.error(reqId, "RECEIVER_NOT_FOUND");
                     MessageDTO m = chatService.sendDirect(
-                            senderId, rid, getStr(p, "content"));
+                            senderId, rid, getStr(p, "content"), getStr(p, "msgType"));
                     return Packet.ok(MessageType.OK, reqId,
                             ChatService.toPayloadMap(m, true));
                 }
@@ -371,7 +378,7 @@ public class ClientHandler implements Runnable {
                     Long gid = getLongOrNull(p, "groupId");
                     if (gid == null || gid <= 0L) return Packet.error(reqId, "GROUP_NOT_FOUND");
                     MessageDTO m = chatService.sendGroup(
-                            senderId, gid, getStr(p, "content"));
+                            senderId, gid, getStr(p, "content"), getStr(p, "msgType"));
                     return Packet.ok(MessageType.OK, reqId,
                             ChatService.toPayloadMap(m, false));
                 }
