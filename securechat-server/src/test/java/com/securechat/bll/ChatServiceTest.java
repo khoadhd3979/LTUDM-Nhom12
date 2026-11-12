@@ -5,6 +5,7 @@ import com.securechat.dao.UserDAO;
 import com.securechat.dto.MessageDTO;
 import com.securechat.dto.UserDTO;
 import com.securechat.exception.BusinessException;
+import com.securechat.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -128,9 +129,14 @@ class ChatServiceTest {
     // --- helpers ---
 
     private static boolean hasDbConfig() {
-        String url = System.getenv("SC_DB_URL");
-        return url != null && !url.isBlank();
+        try {
+            AppConfig.dbUrl();
+            return true;
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
+
 
     private String userEmailOf(long userId) {
         String cached = emailCache.get(userId);

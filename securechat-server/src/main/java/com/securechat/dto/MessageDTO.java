@@ -9,8 +9,8 @@ public class MessageDTO {
     private Long groupId;      // null cho direct message
     private String content;
     private String messageType;
-    private String filePath;
-    private String status;     // null cho group message
+    private Long attachmentId;  // [M2-B] filePath(String) → attachmentId(Long)
+    private String status;      // null cho group message
     private LocalDateTime sentAt;
 
     public long getMessageId() { return messageId; }
@@ -25,8 +25,8 @@ public class MessageDTO {
     public void setContent(String content) { this.content = content; }
     public String getMessageType() { return messageType; }
     public void setMessageType(String messageType) { this.messageType = messageType; }
-    public String getFilePath() { return filePath; }
-    public void setFilePath(String filePath) { this.filePath = filePath; }
+    public Long getAttachmentId() { return attachmentId; }
+    public void setAttachmentId(Long attachmentId) { this.attachmentId = attachmentId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public LocalDateTime getSentAt() { return sentAt; }

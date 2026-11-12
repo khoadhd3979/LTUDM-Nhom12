@@ -1,67 +1,43 @@
-# Database Documentation & Migration Notes (SecureChat-Java)
+# SecureChatDB — Database Documentation (M2-B)
 
-## 1. Active Schema (Phase 1 & Phase 2)
-The authoritative SQL Server schema is in `database/schema_mssql.sql`:
-- `dbo.users`: stores user accounts, bcrypt password hashes, profile data, account status (`PENDING`, `ACTIVE`, `LOCKED`).
-- `dbo.email_otp`: stores 6-digit email activation OTP records with bcrypt hash, expiration timestamp (10 mins), and max attempt tracking.
+## Tổng quan
 
-To initialize or reset the database:
-```sql
--- Execute database/schema_mssql.sql in SQL Server Management Studio (SSMS) or sqlcmd
-```
+- **DBMS:** SQL Server (>= 2019).
+- **Database name:** `SecureChatDB`.
+- **Schema file:** `database/schema_mssql.sql` — tạo 9 bảng + indexes.
+- **Reset script:** `database/00_drop_database_reset.sql` — thao tác **thủ công**, không tự động chạy.
+- **KHÔNG** bảo toàn dữ liệu từ database trước M2-B. Sau khi chạy schema mới trên DB rỗng, mọi tài khoản BCrypt cũ **không đăng nhập được** — phải đăng ký lại.
 
-## 2. Phase 4 Planned Schema (Chat & Messaging)
-Migrated from legacy queries (`_legacy/GroupDAO.java`, `_legacy/MessageDAO.java`):
+## 9 bảng
 
-### Groups Table
-```sql
-CREATE TABLE dbo.groups (
-    id         BIGINT IDENTITY(1,1) PRIMARY KEY,
-    name       NVARCHAR(100) NOT NULL,
-    created_by BIGINT NOT NULL,
-    created_at DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT fk_group_creator FOREIGN KEY (created_by) REFERENCES dbo.users(id)
-);
+| # | Bảng | Vai trò | PK | FK tiêu biểu |
+|---|---|---|---|---|
+| 1 | `users` | Tài khoản + hash password + trạng thái + presence | `id` | — |
+| 2 | `email_otp` | OTP xác thực email | `id` | `user_id → users.id` CASCADE |
+| 3 | `groups` | Nhóm chat | `group_id` | `created_by → users.id` |
+| 4 | `group_members` | Thành viên + role | `(group_id, user_id)` | `group_id → groups` CASCADE, `user_id → users` |
+| 5 | `attachments` | Metadata file đính kèm | `attachment_id` | `uploader_id → users.id` |
+| 6 | `direct_messages` | Tin 1-1 | `message_id` | sender/receiver → users; attachment → attachments |
+| 7 | `group_messages` | Tin nhóm | `message_id` | sender → users; group → groups CASCADE; attachment → attachments |
+| 8 | `group_message_receipts` | Trạng thái per-member cho tin nhóm | `(message_id, user_id)` | message → group_messages CASCADE; user → users (KHÔNG cascade từ group_members) |
+| 9 | `activity_logs` | Audit log | `log_id` | actor → users (nullable) |
 
-CREATE TABLE dbo.group_members (
-    id        BIGINT IDENTITY(1,1) PRIMARY KEY,
-    group_id  BIGINT NOT NULL,
-    user_id   BIGINT NOT NULL,
-    role      NVARCHAR(20) NOT NULL DEFAULT 'MEMBER', -- 'ADMIN', 'MEMBER'
-    joined_at DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT fk_gm_group FOREIGN KEY (group_id) REFERENCES dbo.groups(id) ON DELETE CASCADE,
-    CONSTRAINT fk_gm_user  FOREIGN KEY (user_id)  REFERENCES dbo.users(id) ON DELETE CASCADE,
-    CONSTRAINT uq_group_member UNIQUE (group_id, user_id)
-);
-```
+## Cột nhạy cảm
 
-### Messages Table
-```sql
-CREATE TABLE dbo.messages (
-    id          BIGINT IDENTITY(1,1) PRIMARY KEY,
-    sender_id   BIGINT NOT NULL,
-    receiver_id BIGINT NULL,        -- NULL if group message
-    group_id    BIGINT NULL,        -- NULL if 1-1 direct message
-    content     NVARCHAR(MAX) NOT NULL,
-    type        NVARCHAR(20) NOT NULL DEFAULT 'TEXT', -- 'TEXT', 'FILE'
-    status      NVARCHAR(20) NOT NULL DEFAULT 'SENT', -- 'SENT', 'DELIVERED', 'READ'
-    created_at  DATETIME2(3) NOT NULL DEFAULT SYSUTCDATETIME(),
-    CONSTRAINT fk_msg_sender   FOREIGN KEY (sender_id)   REFERENCES dbo.users(id),
-    CONSTRAINT fk_msg_receiver FOREIGN KEY (receiver_id) REFERENCES dbo.users(id),
-    CONSTRAINT fk_msg_group    FOREIGN KEY (group_id)    REFERENCES dbo.groups(id)
-);
+- **`users.password_hash`** — `NVARCHAR(255)`. Format: `pbkdf2_sha256$600000$<salt_b64>$<dk_b64>` (90 chars).
+- **`email_otp.otp_hash`** — `NVARCHAR(100)`. Format: `pbkdf2_sha256$100000$<salt_b64>$<dk_b64>` (90 chars).
 
-CREATE INDEX ix_msg_history ON dbo.messages (sender_id, receiver_id, created_at);
-CREATE INDEX ix_msg_group   ON dbo.messages (group_id, created_at);
-```
+## Constraints và Indexes
 
-### Standard Chat History Query (Offset-Fetch Pagination)
-```sql
-SELECT id, sender_id, receiver_id, group_id, content, type, status, created_at
-FROM dbo.messages
-WHERE group_id IS NULL
-  AND ((sender_id = @user1 AND receiver_id = @user2) OR (sender_id = @user2 AND receiver_id = @user1))
-ORDER BY created_at ASC
-OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;
-```
+- **UNIQUE:** `users.email`, `attachments.stored_filename`.
+- **CHECK:** `CK_users_gender/status`, `CK_dm_type/status/self/content_len/file_consistency/read_at_consistency`, `CK_gmsg_type/content_len/file_consistency`, `CK_attachment_size/hash_len`, `CK_receipt_read_after_delivered`, `CK_gm_role`, `CK_groups_name_len`.
+- **Indexes:** 5 cũ (OTP, DM sender/receiver, GM group, group_members user) + 7 mới (`IX_users_last_seen`, `IX_attachments_uploader`, `IX_attachments_hash`, `IX_receipts_user_unread` filtered, 3 index cho `activity_logs`).
 
+## Khởi tạo DB từ đầu
+
+### Bước 1 — Cấu hình env
+
+```powershell
+$env:SC_DB_URL      = "jdbc:sqlserver://localhost:1433;databaseName=SecureChatDB;encrypt=true;trustServerCertificate=true"
+$env:SC_DB_USER     = "sa"
+$env:SC_DB_PASSWORD = "<your-password>"

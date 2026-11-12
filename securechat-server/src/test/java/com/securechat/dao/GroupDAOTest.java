@@ -1,5 +1,6 @@
 package com.securechat.dao;
 
+import com.securechat.config.AppConfig;
 import com.securechat.dto.GroupDTO;
 import com.securechat.dto.UserDTO;
 import org.junit.jupiter.api.AfterEach;
@@ -98,9 +99,14 @@ class GroupDAOTest {
     }
 
     private static boolean hasDbConfig() {
-        String url = System.getenv("SC_DB_URL");
-        return url != null && !url.isBlank();
+        try {
+            AppConfig.dbUrl();
+            return true;
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
+
 
     private long createTestUser(String email) throws SQLException {
         UserDTO u = new UserDTO();

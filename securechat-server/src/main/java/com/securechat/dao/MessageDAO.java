@@ -16,9 +16,9 @@ import java.util.Optional;
 public class MessageDAO {
 
     public long insertDirect(long senderId, long receiverId, String content,
-                             String messageType, String filePath) throws SQLException {
+                             String messageType, Long attachmentId) throws SQLException {
         String sql = "INSERT INTO dbo.direct_messages " +
-                     "(sender_id, receiver_id, content, message_type, file_path, status) " +
+                     "(sender_id, receiver_id, content, message_type, attachment_id, status) " +
                      "VALUES (?, ?, ?, ?, ?, 'SENT')";
         try (Connection c = DBConnection.open();
              PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -26,8 +26,8 @@ public class MessageDAO {
             ps.setLong(2, receiverId);
             ps.setString(3, content);
             ps.setString(4, messageType);
-            if (filePath != null) ps.setString(5, filePath);
-            else ps.setNull(5, Types.NVARCHAR);
+            if (attachmentId != null) ps.setLong(5, attachmentId);
+            else ps.setNull(5, Types.BIGINT);
             if (ps.executeUpdate() != 1) throw new SQLException("Insert direct message thất bại.");
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) return rs.getLong(1);
@@ -37,9 +37,9 @@ public class MessageDAO {
     }
 
     public long insertGroup(long senderId, long groupId, String content,
-                            String messageType, String filePath) throws SQLException {
+                            String messageType, Long attachmentId) throws SQLException {
         String sql = "INSERT INTO dbo.group_messages " +
-                     "(sender_id, group_id, content, message_type, file_path) " +
+                     "(sender_id, group_id, content, message_type, attachment_id) " +
                      "VALUES (?, ?, ?, ?, ?)";
         try (Connection c = DBConnection.open();
              PreparedStatement ps = c.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -47,8 +47,8 @@ public class MessageDAO {
             ps.setLong(2, groupId);
             ps.setString(3, content);
             ps.setString(4, messageType);
-            if (filePath != null) ps.setString(5, filePath);
-            else ps.setNull(5, Types.NVARCHAR);
+            if (attachmentId != null) ps.setLong(5, attachmentId);
+            else ps.setNull(5, Types.BIGINT);
             if (ps.executeUpdate() != 1) throw new SQLException("Insert group message thất bại.");
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) return rs.getLong(1);
@@ -59,7 +59,7 @@ public class MessageDAO {
 
     public Optional<MessageDTO> findDirectById(long messageId) throws SQLException {
         String sql = "SELECT message_id, sender_id, receiver_id, content, message_type, " +
-                     "file_path, status, sent_at FROM dbo.direct_messages WHERE message_id = ?";
+                     "attachment_id, status, sent_at FROM dbo.direct_messages WHERE message_id = ?";
         try (Connection c = DBConnection.open();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, messageId);
@@ -71,7 +71,7 @@ public class MessageDAO {
 
     public Optional<MessageDTO> findGroupById(long messageId) throws SQLException {
         String sql = "SELECT message_id, sender_id, group_id, content, message_type, " +
-                     "file_path, sent_at FROM dbo.group_messages WHERE message_id = ?";
+                     "attachment_id, sent_at FROM dbo.group_messages WHERE message_id = ?";
         try (Connection c = DBConnection.open();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setLong(1, messageId);
@@ -96,7 +96,7 @@ public class MessageDAO {
                                               Long beforeMessageId, int limit) throws SQLException {
         boolean withCursor = beforeMessageId != null;
         String sql = "SELECT TOP (?) message_id, sender_id, receiver_id, content, message_type, " +
-                     "file_path, status, sent_at FROM dbo.direct_messages " +
+                     "attachment_id, status, sent_at FROM dbo.direct_messages " +
                      "WHERE ((sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)) " +
                      (withCursor ? "AND message_id < ? " : "") +
                      "ORDER BY message_id DESC";
@@ -121,7 +121,7 @@ public class MessageDAO {
             throws SQLException {
         boolean withCursor = beforeMessageId != null;
         String sql = "SELECT TOP (?) message_id, sender_id, group_id, content, message_type, " +
-                     "file_path, sent_at FROM dbo.group_messages " +
+                     "attachment_id, sent_at FROM dbo.group_messages " +
                      "WHERE group_id = ? " +
                      (withCursor ? "AND message_id < ? " : "") +
                      "ORDER BY message_id DESC";
@@ -145,7 +145,8 @@ public class MessageDAO {
         m.setSenderId(rs.getLong("sender_id"));
         m.setContent(rs.getString("content"));
         m.setMessageType(rs.getString("message_type"));
-        m.setFilePath(rs.getString("file_path"));
+        long attId = rs.getLong("attachment_id");
+        m.setAttachmentId(rs.wasNull() ? null : attId);
         LocalDateTime sentAt = rs.getObject("sent_at", LocalDateTime.class);
         m.setSentAt(sentAt);
         return m;

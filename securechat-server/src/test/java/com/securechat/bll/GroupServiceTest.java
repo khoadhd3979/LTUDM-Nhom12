@@ -1,5 +1,6 @@
 package com.securechat.bll;
 
+import com.securechat.config.AppConfig;
 import com.securechat.dao.DBConnection;
 import com.securechat.dao.GroupDAO;
 import com.securechat.dao.UserDAO;
@@ -94,9 +95,14 @@ class GroupServiceTest {
     }
 
     private static boolean hasDbConfig() {
-        String url = System.getenv("SC_DB_URL");
-        return url != null && !url.isBlank();
+        try {
+            AppConfig.dbUrl();
+            return true;
+        } catch (IllegalStateException e) {
+            return false;
+        }
     }
+
 
     private long createTestUser(String email) throws SQLException {
         UserDTO u = new UserDTO();

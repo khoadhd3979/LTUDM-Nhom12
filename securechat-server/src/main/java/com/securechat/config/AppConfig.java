@@ -5,6 +5,7 @@ import io.github.cdimascio.dotenv.Dotenv;
 public final class AppConfig {
 
     private static final Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+    private static final Dotenv dotenvParent = Dotenv.configure().directory("../").ignoreIfMissing().load();
 
     private AppConfig() {}
 
@@ -36,9 +37,11 @@ public final class AppConfig {
     }
     private static String getVal(String k) {
         String v = dotenv.get(k);
+        if (v == null || v.isBlank()) v = dotenvParent.get(k);
         if (v == null || v.isBlank()) v = System.getenv(k);
         return v;
     }
+
 
     public static String identityKeyPath() { return env("SC_IDENTITY_KEY_PATH", "./server_identity.key"); }
 }
