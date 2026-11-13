@@ -88,6 +88,7 @@ public final class InputValidator {
         return s == null || s.isBlank();
     }
 
+    /** @return content đã trim, non-empty, ≤ 4000 ký tự. */
     public static String validateMessageContent(String content) {
         if (content == null || content.isBlank())
             throw new BusinessException("CONTENT_INVALID", "Nội dung tin nhắn không được để trống");
@@ -97,6 +98,7 @@ public final class InputValidator {
         return trimmed;
     }
 
+    /** @return tên nhóm đã trim, 1..100 ký tự. */
     public static String validateGroupName(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException("GROUP_NAME_INVALID", "Tên nhóm không được để trống");
@@ -106,11 +108,17 @@ public final class InputValidator {
         return trimmed;
     }
 
+    /** @return limit trong [1, 100], default 30 nếu <= 0. */
     public static int normalizeHistoryLimit(int limit) {
         if (limit <= 0) return 30;
         return Math.min(limit, 100);
     }
 
+    /**
+     * [M1] Chuẩn hóa msgType.
+     * Mặc định "TEXT" khi vắng. Chỉ chấp nhận TEXT hoặc STICKER.
+     * FILE chưa được hỗ trợ ở M1 (sẽ mở ở M4).
+     */
     public static String validateMsgType(String raw) {
         if (raw == null || raw.isBlank()) return "TEXT";
         String upper = raw.trim().toUpperCase(Locale.ROOT);
@@ -121,7 +129,8 @@ public final class InputValidator {
         return upper;
     }
 
-    public static void validateProfileAllowedFields(Map<String, Object> payload) {
+    /** [M3-B] Validate profile payload — chỉ 3 field được phép có mặt. */
+    public static void validateProfileAllowedFields(java.util.Map<String, Object> payload) {
         if (payload == null) return;
         String[] allowed = {"fullName", "gender", "dateOfBirth"};
         for (String k : payload.keySet()) {
@@ -132,24 +141,27 @@ public final class InputValidator {
         }
     }
 
+    /** [M3-B] newRole ∈ {ADMIN, MEMBER}. */
     public static String validateGroupRole(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException("INVALID_ROLE", "Role bắt buộc");
-        String r = raw.trim().toUpperCase(Locale.ROOT);
+        String r = raw.trim().toUpperCase(java.util.Locale.ROOT);
         if (!"ADMIN".equals(r) && !"MEMBER".equals(r))
             throw new BusinessException("INVALID_ROLE", "Role phải là ADMIN hoặc MEMBER");
         return r;
     }
 
+    /** [M3-B] messageType ∈ {DIRECT, GROUP}. */
     public static String validateMarkReadType(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException("INVALID_MESSAGE", "messageType bắt buộc");
-        String t = raw.trim().toUpperCase(Locale.ROOT);
+        String t = raw.trim().toUpperCase(java.util.Locale.ROOT);
         if (!"DIRECT".equals(t) && !"GROUP".equals(t))
             throw new BusinessException("INVALID_MESSAGE", "messageType phải DIRECT/GROUP");
         return t;
     }
 
+    /** [M3-B] Broadcast 1..1000 ký tự. */
     public static String validateBroadcastMessage(String raw) {
         if (raw == null || raw.isBlank())
             throw new BusinessException("INVALID_MESSAGE", "Nội dung broadcast bắt buộc");

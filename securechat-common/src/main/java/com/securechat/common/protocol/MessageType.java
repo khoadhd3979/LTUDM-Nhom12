@@ -38,15 +38,14 @@ public final class MessageType {
     public static final String SEARCH_USER = "SEARCH_USER";
 
     // ============================================================
-    // Core Backend additions (M3)
-    // NO PUSH_SYSTEM_BROADCAST, NO SYSTEM_FORCE_LOGOUT
+    // Core Backend additions (NO PUSH_SYSTEM_BROADCAST, NO SYSTEM_FORCE_LOGOUT)
     // ============================================================
     public static final String UPDATE_PROFILE       = "UPDATE_PROFILE";
     public static final String REMOVE_GROUP_MEMBER  = "REMOVE_GROUP_MEMBER";
     public static final String SET_GROUP_ROLE       = "SET_GROUP_ROLE";
     public static final String MARK_READ            = "MARK_READ";
-    public static final String MESSAGE_STATUS       = "MESSAGE_STATUS";
-    public static final String SYSTEM_BROADCAST     = "SYSTEM_BROADCAST";
+    public static final String MESSAGE_STATUS       = "MESSAGE_STATUS";       // C↔S, legacy conversation-level + push S→C {status:"SEEN"} for direct
+    public static final String SYSTEM_BROADCAST     = "SYSTEM_BROADCAST";     // C↔S, E-1 canonical
     public static final String LOCK_USER            = "LOCK_USER";
     public static final String UNLOCK_USER          = "UNLOCK_USER";
     public static final String USER_STATS           = "USER_STATS";
