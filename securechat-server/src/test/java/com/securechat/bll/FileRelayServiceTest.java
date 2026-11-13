@@ -202,7 +202,27 @@ class FileRelayServiceTest {
     // Helpers
     // ============================================================
 
+    @Test
+    void relayGroup_AmbiguousGroupName_ThrowsAmbiguousGroupName() throws Exception {
+        long senderId = testUserIds.get(0);
+        String dupName = "DupGrp-" + UUID.randomUUID();
+        long g1 = groupService.createGroup(senderId, dupName).getGroupId();
+        testGroupIds.add(g1);
+        long g2 = groupService.createGroup(senderId, dupName).getGroupId();
+        testGroupIds.add(g2);
+
+        UserDTO senderUser = userDAO.findById(senderId).orElseThrow();
+        Map<String, Object> chunk = validChunk("file-g4", 0, 1);
+        chunk.put("groupName", dupName);
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> relay.relayGroup(senderUser, dupName, chunk));
+        assertEquals("AMBIGUOUS_GROUP_NAME", ex.getCode());
+    }
+
+
     /** Fake ClientHandler — override sendSecure để capture packet, không cần session thật. */
+    
     static class FakeHandler extends ClientHandler {
         final List<Packet> received = new ArrayList<>();
         FakeHandler() { super(null); }
