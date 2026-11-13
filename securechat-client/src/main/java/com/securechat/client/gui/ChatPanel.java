@@ -61,18 +61,10 @@ public class ChatPanel extends JPanel {
                 selectTarget(friendList.getSelectedValue().split(" ")[0].trim(), false);
             }
         });
-        JButton btnAddFriend = new JButton("+ Thêm Bạn Bè / Chat");
+        JButton btnAddFriend = new JButton("+ Nhập Email Chat");
         btnAddFriend.addActionListener(e -> {
-            String email = JOptionPane.showInputDialog(this, "Nhập email người muốn thêm bạn/nhắn tin:");
-            if (email != null && !email.trim().isEmpty()) {
-                email = email.trim();
-                String err = InputValidator.email(email);
-                if (err != null) {
-                    JOptionPane.showMessageDialog(this, err, "Lỗi", JOptionPane.WARNING_MESSAGE);
-                    return;
-                }
-                controller.addFriend(email);
-            }
+            String email = JOptionPane.showInputDialog(this, "Nhập email:");
+            if (email != null && !email.trim().isEmpty()) { addOrUpdateFriend(email, "ONLINE"); selectTarget(email, false); }
         });
         friendPanel.add(new JScrollPane(friendList), BorderLayout.CENTER);
         friendPanel.add(btnAddFriend, BorderLayout.SOUTH);
@@ -183,17 +175,7 @@ public class ChatPanel extends JPanel {
     private void chooseAndSendFile() {
         if (currentTarget == null) return;
         JFileChooser fc = new JFileChooser();
-        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            File selectedFile = fc.getSelectedFile();
-
-            String err = InputValidator.attachment(selectedFile);
-            if (err != null) {
-                JOptionPane.showMessageDialog(this, err, "Lỗi file", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
-
-            controller.sendFile(currentTarget, isGroupChat, selectedFile);
-        }
+        if (fc.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) controller.sendFile(currentTarget, isGroupChat, fc.getSelectedFile());
     }
     private void sendText() {
         if (currentTarget == null) return;

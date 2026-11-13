@@ -1,5 +1,7 @@
 package com.securechat.client.controller;
 
+import com.securechat.client.file.CompletedFile;
+import com.securechat.client.file.FileReceiveService;
 import com.securechat.client.gui.*;
 import com.securechat.client.network.NetworkManager;
 import com.securechat.client.security.SecureTransport;
@@ -87,6 +89,7 @@ public class ClientController implements NetworkManager.MessageListener {
     private final MainFrame mainFrame;
     private final ChatPanel chatPanel;
     private final OTPPanel otpPanel;
+    private final FileReceiveService fileReceiveService = new FileReceiveService();
 
     private PublicKey serverIdentityPub;
     private String keyLoadError;
@@ -269,6 +272,10 @@ public class ClientController implements NetworkManager.MessageListener {
             sendQuietly(Packet.request(MessageType.LOGOUT, UUID.randomUUID().toString(), new HashMap<>()));
         }
         network.disconnectAndWait();
+        // [M4-C C-4] Cleanup tường minh (shutdown() không gọi resetConnection()).
+        fileReceiveService.clearAll();
+        lastCompleteFileBytes = null;
+        lastCompleteFileName = null;
         System.exit(0);
     }
 
@@ -740,6 +747,7 @@ public class ClientController implements NetworkManager.MessageListener {
                 if (pl != null) chatPanel.appendMessage("📢 [HỆ THỐNG]: " + pl.get("message"));
                 return;
             }
+            case "FILE_CHUNK" -> { handlePushFileChunk(inner); return; }
             default -> { /* không phải PUSH: là phản hồi request-response */ }
         }
 
@@ -770,6 +778,48 @@ public class ClientController implements NetworkManager.MessageListener {
         String group = str(pl, "groupName", "groupId");
         String time = fmtTime(pl.get("sentAt"));
         chatPanel.appendMessage("[" + time + "] [Nhóm " + group + "] " + sender + ": " + str(pl, "content"));
+    }
+
+    /**
+     * [M4-C] Nhận một packet FILE_CHUNK relay từ Server.
+     *
+     * Chạy trên EDT (onMessageReceived đảm bảo). Parse phòng thủ: bất kỳ field
+     * thiếu/sai kiểu → drop chunk, không throw, không làm hỏng receive loop.
+     */
+    private void handlePushFileChunk(Packet inner) {
+        Map<String, Object> pl = inner.getPayload();
+        if (pl == null) return;
+
+        long senderId;
+        try { senderId = asLong(pl.get("senderId")); }
+        catch (RuntimeException e) { return; }
+        if (senderId <= 0) return;
+
+        Object fileIdO = pl.get("fileId");
+        Object fileNameO = pl.get("fileName");
+        Object dataO = pl.get("data");
+        if (!(fileIdO instanceof String fileId) || fileId.isBlank()) return;
+        if (!(fileNameO instanceof String fileName) || fileName.isBlank()) return;
+        if (!(dataO instanceof String data)) return;
+
+        int chunkIndex;
+        int totalChunks;
+        try {
+            chunkIndex = asInt(pl.get("chunkIndex"));
+            totalChunks = asInt(pl.get("totalChunks"));
+        } catch (RuntimeException e) {
+            return;
+        }
+
+        Optional<CompletedFile> completed = fileReceiveService.onChunk(
+                senderId, fileId, fileName, chunkIndex, totalChunks, data);
+
+        completed.ifPresent(cf -> {
+            lastCompleteFileBytes = cf.getData();
+            lastCompleteFileName = cf.getFileName();
+            chatPanel.appendMessage("[File] Đã nhận file '" + cf.getFileName() + "' ("
+                    + cf.getData().length + " bytes) — bấm 'Lưu File' để lưu.");
+        });
     }
 
     @Override
@@ -804,6 +854,10 @@ public class ClientController implements NetworkManager.MessageListener {
         loggedIn = false;
         groupIdByName.clear();
         setBusy(false);
+        // [M4-C C-4] Xóa toàn bộ transfer chưa hoàn tất + slot file hoàn tất.
+        fileReceiveService.clearAll();
+        lastCompleteFileBytes = null;
+        lastCompleteFileName = null;
     }
 
     private void setBusy(boolean b) { busy = b; mainFrame.setBusy(b); }
@@ -846,5 +900,12 @@ public class ClientController implements NetworkManager.MessageListener {
     public static long asLong(Object v) {
         if (v == null) return 0L;
         return v instanceof Number n ? n.longValue() : Long.parseLong(String.valueOf(v));
+    }
+
+    /** [M4-C] Parse int phòng thủ — null hoặc không phải số → IllegalArgumentException. */
+    private static int asInt(Object v) {
+        if (v == null) throw new IllegalArgumentException("null");
+        if (v instanceof Number n) return n.intValue();
+        return Integer.parseInt(String.valueOf(v));
     }
 }
