@@ -1,9 +1,10 @@
-# SecureChat Protocol v0.5 — Secure Transport & Application Commands
+# SecureChat Protocol v0.6 — Secure Transport & Application Commands
 
+> **v0.6 (M4-B — File transfer relay):** Triển khai FILE_CHUNK relay phía Server (M4-B): stateless per-chunk, bổ sung senderId/senderEmail ở payload chuyển tiếp, không buffer/DB/migration. §6.9 viết lại thành contract FILE_CHUNK đã triển khai. §6.11 loại FILE_CHUNK khỏi deferral register. §1–§6.8 và §6.10 giữ nguyên nội dung so với v0.5.
+>
 > **v0.5 (M3 — Phase 4 Documentation):** Bổ sung tài liệu cho 9 command M3 đã triển khai và nghiệm thu trên server tại commit `ddabb69` (M3-B CLOSED — PASS): `UPDATE_PROFILE`, `REMOVE_GROUP_MEMBER`, `SET_GROUP_ROLE`, `MARK_READ`, `MESSAGE_STATUS`, `LOCK_USER`, `UNLOCK_USER`, `SYSTEM_BROADCAST`, `USER_STATS`. Mở rộng §6.7 (Push) với 3 push M3: `MESSAGE_STATUS {status:"SEEN"}`, `SYSTEM_BROADCAST {message}`, `ERROR {ACCOUNT_LOCKED}`. Mở rộng §6.8 (bảng lỗi). Thêm §6.10 (lệnh M3) và §6.11 (command không được hỗ trợ). §1–§6.6 và §6.9 giữ nguyên nội dung so với v0.4.
 >
->
-> **Nguồn sự thật:** Nội dung §6.7–§6.11 được trích từ source tại `ddabb69`. Khi M3-A Design (v1 + Errata + Delta 2) khác source, tài liệu này mô tả theo source.
+> **Nguồn sự thật:** Nội dung §6.7–§6.11 được trích từ source tại `c36d328` (= M3-B CLOSED + Phase 4 docs merged). Khi M3-A Design (v1 + Errata + Delta 2) khác source, tài liệu này mô tả theo source.
 
 ## 1. Transport & Framing
 - **Protocol:** TCP Socket qua cổng `SC_PORT` (mặc định `8080`).
@@ -291,13 +292,109 @@ Khi admin lock một tài khoản đang online, sau khi commit transaction lock 
 
 > **Ghi chú:** `INVALID_STATUS` không tồn tại trong source tại `ddabb69`. `MESSAGE_STATUS` với `status != "SEEN"` trả `INVALID_MESSAGE`.
 
-### 6.9. File transfer (planned — M4)
+### 6.9. FILE_CHUNK — File transfer relay (M4-B)
 
-**Chưa triển khai phía Server ở M1.** Ghi nhận để tránh nhầm lẫn:
+Server relay **stateless per-chunk**: mỗi packet `FILE_CHUNK` là một đơn vị độc lập, Server validate + resolve đích + đóng gói lại packet rồi gửi qua secure channel của **phiên người nhận** (`sendSecure` của handler đích). Không buffer, không lưu file, không DB, không migration, không trạng thái transfer, không ACK, không packet hoàn tất.
 
-- File transfer **không** dùng `msgType = FILE` trên các lệnh chat (§6.4).
-- Client hiện đã có code gửi packet `FILE_CHUNK` (chunk Base64, kích thước chunk mặc định 8 KiB theo `FileChunkUtils`, nằm trong trần 256 KiB/packet ở §2) — Server **chưa có handler** cho `FILE_CHUNK` ở M1 nên packet này hiện nhận `UNKNOWN_TYPE`.
-- Contract chi tiết sẽ chốt ở M4 với **baseline là protocol `FILE_CHUNK` Client hiện có**; không thiết kế bộ packet thay thế.
+#### 6.9.1. Request (Client → Server)
+
+Gửi bên trong `SECURE_MESSAGE`, yêu cầu đã đăng nhập (`UNAUTHENTICATED` nếu chưa).
+
+```json
+{ "type": "FILE_CHUNK", "requestId": "req-chunk-0",
+  "payload": {
+    "fileId": "f-2f3e...-uuid",
+    "fileName": "bao-cao.pdf",
+    "chunkIndex": 0,
+    "totalChunks": 8,
+    "data": "Base64(chunk_bytes)",
+    "receiver": "peer@example.com"
+  } }
+```
+
+| Field | Kiểu | Bắt buộc | Ràng buộc |
+|---|---|---|---|
+| `fileId` | string | ✅ | Không rỗng, không blank. Không giới hạn định dạng (Client dùng UUID) |
+| `fileName` | string | ✅ | Không rỗng, không blank |
+| `chunkIndex` | int | ✅ | ∈ `[0, totalChunks)` |
+| `totalChunks` | int | ✅ | ∈ `[1, 128]` (128 × 8 KiB = 1 MiB — trần file REQ-FUN-05) |
+| `data` | string | ✅ | Base64 **hợp lệ** (chỉ ký tự alphabet + `=`). Sau khi decode: **1..262,144 byte** (trần §2) |
+| `receiver` | string | ✅ **XOR** `groupName` | Email người nhận. Đúng một trong hai field phải có mặt và không blank; cả hai hoặc không có → `INVALID_MESSAGE` |
+| `groupName` | string | ✅ **XOR** `receiver` | Tên nhóm |
+
+Field khác trong payload (kể cả `senderId`/`senderEmail` nếu Client gửi) → **bỏ qua**, không đọc, không dùng. Danh tính sender luôn lấy từ session.
+
+#### 6.9.2. Response (Server → Client gửi)
+
+```json
+{ "type": "OK", "requestId": "req-chunk-0", "status": "OK", "payload": {} }
+```
+
+Payload rỗng `{}`. Client **không** chờ ACK per-chunk theo kiểu tương tác — packet OK chỉ mang tính xác nhận dispatch đã xử lý; nếu Client gửi fire-and-forget, có thể bỏ qua response.
+
+#### 6.9.3. Relay packet (Server → Client nhận)
+
+Mỗi người nhận online nhận **một** packet `FILE_CHUNK` độc lập qua `sendSecure` của handler mình, bọc trong `SECURE_MESSAGE`.
+
+**Direct:**
+```json
+{ "type": "FILE_CHUNK", "requestId": "push-file-f-2f3e...-0", "status": "OK",
+  "payload": {
+    "fileId": "f-2f3e...-uuid",
+    "fileName": "bao-cao.pdf",
+    "chunkIndex": 0,
+    "totalChunks": 8,
+    "data": "Base64(chunk_bytes)",
+    "senderId": 42,
+    "senderEmail": "alice@example.com"
+  } }
+```
+
+**Group** (bổ sung `groupId` + `groupName` canonical từ DB):
+```json
+{ "type": "FILE_CHUNK", "requestId": "push-file-f-2f3e...-0", "status": "OK",
+  "payload": {
+    "fileId": "f-2f3e...-uuid",
+    "fileName": "bao-cao.pdf",
+    "chunkIndex": 0,
+    "totalChunks": 8,
+    "data": "Base64(chunk_bytes)",
+    "senderId": 42,
+    "senderEmail": "alice@example.com",
+    "groupId": 5,
+    "groupName": "Team Alpha"
+  } }
+```
+
+- Năm field `fileId`, `fileName`, `chunkIndex`, `totalChunks`, `data` giữ nguyên **byte** từ request Client (đặc biệt `data` không decode/re-encode ở chiều relay).
+- `senderId` là user id từ session; `senderEmail` từ bản ghi user của sender.
+- `requestId` format: `"push-file-" + fileId + "-" + chunkIndex`.
+- Nhánh direct **không** có `receiver` trong relay payload; nhánh group **có** `groupName` canonical (không phải tên Client gửi lên nếu khác hoa/thường).
+- Relay payload không chứa field định danh sender khác.
+
+#### 6.9.4. Hành vi
+
+- **Direct, người nhận offline:** sender nhận `RECEIVER_NOT_FOUND`. Không có buffer, không có "gửi lại sau" — Client phải gửi lại toàn bộ file nếu muốn.
+- **Direct, email không resolve user ACTIVE:** `USER_NOT_FOUND`.
+- **Group, không thành viên nào online:** sender nhận `OK` với payload `{}`. Không lỗi.
+- **Group, tên nhóm không tồn tại:** `GROUP_NOT_FOUND`. **Tên nhóm trùng ≥ 2 kết quả:** `AMBIGUOUS_GROUP_NAME` — Server không tự chọn nhóm; vì `FILE_CHUNK` không nhận `groupId`, lỗi này chỉ hết khi các nhóm của actor không còn trùng tên.
+- **Partial fanout failure** (group): nếu `sendSecure` tới một thành viên fail (socket đóng giữa chừng), các thành viên còn lại vẫn nhận packet. Sender vẫn nhận `OK`.
+- **Không ACK, không completion packet.** Client nhận không cần (và không có) packet "file hoàn tất"; phải tự ghép chunk theo `fileId` + `chunkIndex` (tối đa `totalChunks`). Nếu thiếu chunk (mất mạng, offline) → Client phải báo lỗi; Server không phát hiện hộ.
+- **Không audit:** catalog activity log M3 không có sự kiện file; chunk-rate sẽ gây spam → không ghi `activity_logs`.
+- **Không log data:** log debug (nếu có) chỉ chứa `senderId`, `fileId`, `chunkIndex`, đích — tuyệt đối không log `data`.
+- **Session-identity:** `senderId`/`senderEmail` lấy từ `getCurrentUserId()` + DTO session; Client **không** được gửi và Server **không** đọc `senderId`/`senderEmail` từ payload.
+
+#### 6.9.5. Mã lỗi
+
+| Code | Điều kiện |
+|---|---|
+| `UNAUTHENTICATED` | Chưa đăng nhập |
+| `INVALID_MESSAGE` | Bất kỳ validate payload thất bại (thiếu field, sai kiểu, `totalChunks`/`chunkIndex` ngoài range, Base64 không hợp lệ, `data` decode ra 0 hoặc > 262144 byte, thiếu/có cả hai trong `receiver`/`groupName`) |
+| `USER_NOT_FOUND` | Direct: email không resolve user ACTIVE |
+| `RECEIVER_NOT_FOUND` | Direct: người nhận offline |
+| `GROUP_NOT_FOUND` | Group: tên nhóm không khớp nhóm nào của actor |
+| `AMBIGUOUS_GROUP_NAME` | Group: tên nhóm khớp ≥ 2 nhóm của actor |
+| `DB_ERROR` | Lỗi SQL / DAO khi resolve |
 
 ### 6.10. Lệnh M3 (C→S)
 
@@ -588,7 +685,7 @@ Nếu pass: update `users.status='LOCKED'` + audit `USER_LOCKED` cùng connectio
 
 ### 6.11. Command không được hỗ trợ (deferral register)
 
-Các type dưới đây **không** có handler phía Server tại thời điểm viết (ddabb69). Nếu Client gửi, Server trả `UNKNOWN_TYPE`.
+Các type dưới đây **không** có handler phía Server tại thời điểm viết (c36d328), **trừ** `FILE_CHUNK` (đã hỗ trợ ở M4-B — xem §6.9). Nếu Client gửi type không có handler, Server trả `UNKNOWN_TYPE`.
 
 | Type | Lý do | Command thay thế / ghi chú |
 |---|---|---|
@@ -598,4 +695,4 @@ Các type dưới đây **không** có handler phía Server tại thời điểm
 | `FRIEND_STATUS` | Chưa duyệt — Server **không** gửi push này | Không có |
 | `BLOCK_USER` | Khác `LOCK_USER` (user-level block vs system-admin lock); chưa triển khai | Không có. `LOCK_USER` chỉ dành cho system-admin |
 | `SEND_STICKER` | Không có command riêng | Dùng `SEND_DIRECT_MESSAGE` / `SEND_GROUP_MESSAGE` với `msgType = "STICKER"` |
-| `FILE_CHUNK` | M4 — xem §6.9 | Chưa hỗ trợ |
+| ~~`FILE_CHUNK`~~ | ✅ **Đã hỗ trợ tại M4-B** — xem §6.9 | Dùng `FILE_CHUNK` với payload theo §6.9.1 |

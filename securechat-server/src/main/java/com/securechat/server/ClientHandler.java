@@ -3,6 +3,7 @@ package com.securechat.server;
 import com.securechat.bll.AdminService;
 import com.securechat.bll.AuthService;
 import com.securechat.bll.ChatService;
+import com.securechat.bll.FileRelayService;
 import com.securechat.bll.GroupService;
 import com.securechat.bll.UserBLL;
 import com.securechat.validation.InputValidator;
@@ -43,6 +44,7 @@ public class ClientHandler implements Runnable {
     private final SecureTransport transport = new SecureTransport(session);
     private final UserBLL userBLL = new UserBLL();
     private final AdminService adminService = new AdminService();
+    private final FileRelayService fileRelayService = new FileRelayService();
 
     private final Object writeLock = new Object();
     private volatile long connId = -1L;
@@ -51,7 +53,6 @@ public class ClientHandler implements Runnable {
 
     public ClientHandler(Socket socket) { this.socket = socket; }
 
-    /** @return authenticated user id, or -1 if not logged in. */
     public long getCurrentUserId() {
         UserDTO u = this.currentUser;
         return u == null ? -1L : u.getId();
@@ -61,10 +62,6 @@ public class ClientHandler implements Runnable {
         return this.currentUser != null;
     }
 
-    /**
-     * Public thread-safe — dùng cho push từ thread khác.
-     * @return true nếu encode + write thành công (không phát hiện lỗi ghi).
-     */
     public boolean sendSecure(Packet inner) {
         synchronized (writeLock) {
             try {
@@ -167,13 +164,10 @@ public class ClientHandler implements Runnable {
                     }
                     writePlain(writer, Packet.ok(MessageType.PONG, req.getRequestId(), tsPayload()));
                     return true;
-
                 case MessageType.CLIENT_HELLO:
                     return handleClientHello(req, writer);
-
                 case MessageType.KEY_EXCHANGE:
                     return handleKeyExchange(req, writer);
-
                 default:
                     if (session.getState() == SecureSession.State.ESTABLISHED) {
                         System.err.println("[SEC] connId=" + connId + " plaintext " + req.getType()
@@ -362,7 +356,6 @@ public class ClientHandler implements Runnable {
                     this.currentUser = u;
                     return Packet.ok(MessageType.OK, reqId, userPayload(u));
                 }
-                // [M3-B P-6] capture → unregister → updateLastSeen (if true) → clear
                 case MessageType.LOGOUT: {
                     if (currentUser == null) return Packet.error(reqId, "NOT_LOGGED_IN");
                     long uid = currentUser.getId();
@@ -384,7 +377,6 @@ public class ClientHandler implements Runnable {
                             ChatService.toSearchUserPayload(found));
                 }
 
-                // ---- Chat ----
                 case MessageType.SEND_DIRECT_MESSAGE: {
                     long senderId = getCurrentUserId();
                     if (senderId <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -430,7 +422,6 @@ public class ClientHandler implements Runnable {
                             historyPayload(list, limit, false));
                 }
 
-                // ---- Group ----
                 case MessageType.CREATE_GROUP: {
                     long senderId = getCurrentUserId();
                     if (senderId <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -476,7 +467,6 @@ public class ClientHandler implements Runnable {
                     return Packet.ok(MessageType.OK, reqId, payload);
                 }
 
-                // ---- Profile ----
                 case MessageType.UPDATE_PROFILE: {
                     long uid = getCurrentUserId();
                     if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -484,7 +474,6 @@ public class ClientHandler implements Runnable {
                     return Packet.ok(MessageType.OK, reqId, userPayload(updated));
                 }
 
-                // ---- Group management ----
                 case MessageType.REMOVE_GROUP_MEMBER: {
                     long uid = getCurrentUserId();
                     if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -514,8 +503,6 @@ public class ClientHandler implements Runnable {
                     return Packet.ok(MessageType.OK, reqId, out);
                 }
 
-                // ---- Read status ----
-                // [M3-B P-3] MARK_READ direct — response không chứa readAt; status từ DTO refetch.
                 case MessageType.MARK_READ: {
                     long uid = getCurrentUserId();
                     if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -529,7 +516,6 @@ public class ClientHandler implements Runnable {
                         out.put("messageId", m.getMessageId());
                         out.put("messageType", "DIRECT");
                         if (m.getStatus() != null) out.put("status", m.getStatus());
-                        // Không trả readAt — tránh dùng sentAt thay thế.
                     } else {
                         chatService.markReadGroup(uid, mid);
                         out.put("messageId", mid);
@@ -562,7 +548,24 @@ public class ClientHandler implements Runnable {
                     return Packet.ok(MessageType.OK, reqId, out);
                 }
 
-                // ---- System-admin commands ----
+                // ============================================================
+                // [M4-B] FILE_CHUNK relay
+                // ============================================================
+                case MessageType.FILE_CHUNK: {
+                    long uid = getCurrentUserId();
+                    if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
+                    Map<String, Object> chunk = InputValidator.validateFileChunk(p);
+                    UserDTO senderUser = currentUser;
+                    if (chunk.containsKey("groupName")) {
+                        String groupName = (String) chunk.get("groupName");
+                        fileRelayService.relayGroup(senderUser, groupName, chunk);
+                    } else {
+                        String receiverEmail = (String) chunk.get("receiver");
+                        fileRelayService.relayDirect(senderUser, receiverEmail, chunk);
+                    }
+                    return Packet.ok(MessageType.OK, reqId, Collections.emptyMap());
+                }
+
                 case MessageType.LOCK_USER: {
                     long uid = getCurrentUserId();
                     if (uid <= 0L) return Packet.error(reqId, "UNAUTHENTICATED");
@@ -572,14 +575,12 @@ public class ClientHandler implements Runnable {
                     try {
                         adminService.lockUser(uid, tid, reason, remoteIp());
                     } catch (BusinessException be) {
-                        // [M3-B P-2] CANNOT_LOCK_LAST_ADMIN_OF_GROUP mang details {groupIds}; chuyển thẳng.
                         if ("CANNOT_LOCK_LAST_ADMIN_OF_GROUP".equals(be.getCode())
                                 && !be.getDetails().isEmpty()) {
                             return Packet.error(reqId, be.getCode(), be.getDetails());
                         }
                         throw be;
                     }
-                    // Best-effort ERROR + đóng socket target (vô điều kiện).
                     ClientHandler target = ClientConnectionManager.findByUserId(tid);
                     if (target != null) {
                         try { target.sendSecure(Packet.error(null, "ACCOUNT_LOCKED")); }
@@ -692,11 +693,6 @@ public class ClientHandler implements Runnable {
         try { socket.close(); } catch (IOException ignored) {}
     }
 
-    /**
-     * [M3-B P-6] Capture userId → unregister → updateLastSeen (nếu true) → clear currentUser.
-     * Exactly-once last_seen trên cả LOGOUT và disconnect (LOGOUT clear currentUser trước
-     * nên releaseSession tự no-op khi đã LOGOUT).
-     */
     private void releaseSession() {
         UserDTO u = this.currentUser;
         if (u == null) return;
